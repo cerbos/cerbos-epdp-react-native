@@ -8,7 +8,7 @@ import {
   Resource,
 } from "@cerbos/core/src/types/external";
 import { useEffect, useState } from "react";
-import { Button, ScrollView, StyleSheet, View, Text } from "react-native";
+import { Button, ScrollView, StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import SelectDropdown from "react-native-select-dropdown";
 
@@ -69,15 +69,20 @@ export default function HomeScreen() {
         <ThemedView style={styles.titleContainer}>
           <ThemedText type="title">ePDP Demo</ThemedText>
         </ThemedView>
-        <View
+        <ThemedView
           style={{
             flex: 1,
             flexDirection: "row",
-            alignItems: "center",
+            alignItems: "flex-start",
             justifyContent: "center",
           }}
         >
-          <View>
+          <ThemedView
+            style={{
+              flex: 1,
+              flexDirection: "column",
+            }}
+          >
             <SelectDropdown
               data={principals.map((p) => ({ title: p.id, value: p }))}
               defaultValue={{ title: principal.id, value: principal }}
@@ -86,34 +91,42 @@ export default function HomeScreen() {
               }}
               renderButton={(selectedItem, isOpen) => {
                 return (
-                  <View style={styles.dropdownButtonStyle}>
-                    <Text style={styles.dropdownButtonTxtStyle}>
+                  <ThemedView style={styles.dropdownButtonStyle}>
+                    <ThemedText style={styles.dropdownButtonTxtStyle}>
                       {(selectedItem && selectedItem.title) ||
                         "Select principal"}
-                    </Text>
-                  </View>
+                    </ThemedText>
+                  </ThemedView>
                 );
               }}
               renderItem={(item, index, isSelected) => {
                 return (
-                  <View
+                  <ThemedView
                     style={{
                       ...styles.dropdownItemStyle,
                       ...(isSelected && { backgroundColor: "#D2D9DF" }),
                     }}
                   >
-                    <Text style={styles.dropdownItemTxtStyle}>
+                    <ThemedText style={styles.dropdownItemTxtStyle}>
                       {item.title}
-                    </Text>
-                  </View>
+                    </ThemedText>
+                  </ThemedView>
                 );
               }}
               showsVerticalScrollIndicator={false}
               dropdownStyle={styles.dropdownMenuStyle}
             />
-            <Text>{JSON.stringify(principal, null, 2)}</Text>
-          </View>
-          <View>
+            <ThemedText
+              style={{
+                fontSize: 12,
+                lineHeight: 16,
+                padding: 8,
+              }}
+            >
+              {JSON.stringify(principal, null, 2)}
+            </ThemedText>
+          </ThemedView>
+          <ThemedView>
             <SelectDropdown
               data={resources.map((r) => ({ title: r.id, value: r }))}
               onSelect={(selectedItem, index) => {
@@ -122,42 +135,45 @@ export default function HomeScreen() {
               defaultValue={{ title: resource.id, value: resource }}
               renderButton={(selectedItem, isOpen) => {
                 return (
-                  <View style={styles.dropdownButtonStyle}>
-                    <Text style={styles.dropdownButtonTxtStyle}>
+                  <ThemedView style={styles.dropdownButtonStyle}>
+                    <ThemedText style={styles.dropdownButtonTxtStyle}>
                       {(selectedItem && selectedItem.title) ||
                         "Select resource"}
-                    </Text>
-                  </View>
+                    </ThemedText>
+                  </ThemedView>
                 );
               }}
               renderItem={(item, index, isSelected) => {
                 return (
-                  <View
+                  <ThemedView
                     style={{
                       ...styles.dropdownItemStyle,
                       ...(isSelected && { backgroundColor: "#D2D9DF" }),
                     }}
                   >
-                    <Text style={styles.dropdownItemTxtStyle}>
+                    <ThemedText style={styles.dropdownItemTxtStyle}>
                       {item.title}
-                    </Text>
-                  </View>
+                    </ThemedText>
+                  </ThemedView>
                 );
               }}
               showsVerticalScrollIndicator={false}
               dropdownStyle={styles.dropdownMenuStyle}
             />
-            <Text>{JSON.stringify(resource, null, 2)}</Text>
-          </View>
-        </View>
+            <ThemedText
+              style={{
+                fontSize: 12,
+                lineHeight: 16,
+                padding: 8,
+              }}
+            >
+              {JSON.stringify(resource, null, 2)}
+            </ThemedText>
+          </ThemedView>
+        </ThemedView>
 
         {/* Display Cerbos PDP loading state */}
         {!isLoaded && <ThemedText>Loading Cerbos PDP...</ThemedText>}
-        {pdpLoadedAt && (
-          <ThemedText>
-            Cerbos PDP loaded at: {pdpLoadedAt.toISOString()}
-          </ThemedText>
-        )}
 
         {/* Example of how to use the useCerbos hook directly */}
         <SampleAuthCheck
@@ -165,6 +181,11 @@ export default function HomeScreen() {
           resource={resource}
           actions={["create", "read", "update", "delete"]}
         />
+        {pdpLoadedAt && (
+          <ThemedText style={{ fontSize: 12, textAlign: "center" }}>
+            Cerbos PDP loaded at: {pdpLoadedAt.toISOString()}
+          </ThemedText>
+        )}
       </SafeAreaView>
     </ScrollView>
   );
@@ -217,7 +238,7 @@ function SampleAuthCheck({
       />
       {actions.map((action) => {
         return (
-          <View style={{ flexDirection: "row", gap: 8 }} key={action}>
+          <ThemedView style={{ flexDirection: "row", gap: 8 }} key={action}>
             <ThemedText>{action}:</ThemedText>
 
             {result ? (
@@ -241,7 +262,7 @@ function SampleAuthCheck({
             ) : (
               <ThemedText>-</ThemedText>
             )}
-          </View>
+          </ThemedView>
         );
       })}
     </ThemedView>
