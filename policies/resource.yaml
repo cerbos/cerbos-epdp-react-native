@@ -16,7 +16,7 @@ resourcePolicy:
         - USER
       condition:
         match:
-          expr: P.attr.ownerId == P.id
+          expr: R.attr.ownerId == P.id
 
     - actions: ["delete", "update"]
       effect: EFFECT_ALLOW

@@ -11,11 +11,8 @@ import { useEffect } from "react";
 import "react-native-reanimated";
 
 import { useColorScheme } from "@/hooks/useColorScheme";
-import * as RNWASM from "react-native-webassembly";
 
-import "react-native-get-random-values";
 import { CerbosProvider } from "@/components/CerbosContext";
-global.WebAssembly = RNWASM as any;
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
