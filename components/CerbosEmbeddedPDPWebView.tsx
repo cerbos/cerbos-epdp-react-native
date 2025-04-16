@@ -34,8 +34,10 @@ export default function CerbosEmbeddedPDPWebView({
     let loader: AutoUpdatingLoader | null = null;
     try {
       loader = new AutoUpdatingLoader(url, {
-        onLoad: () => {
-          console.log("[CerbosWebview] Policy bundle loaded.");
+        onLoad: (metadata) => {
+          console.log(
+            `[CerbosWebview] Policy bundle loaded. ${metadata.commit} - ${metadata.builtAt}`
+          );
           handlePDPUpdated();
           loaded(true);
         },
@@ -43,6 +45,7 @@ export default function CerbosEmbeddedPDPWebView({
           console.error("[CerbosWebview] Error loading policy bundle:", err);
           loaded(false); // Indicate loading failed
         },
+        activateOnLoad: true,
         interval: refreshIntervalSeconds * 1000, // Convert seconds to milliseconds
       });
       setCerbos(new Embedded(loader));

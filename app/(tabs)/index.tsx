@@ -155,7 +155,7 @@ export default function HomeScreen() {
         {!isLoaded && <ThemedText>Loading Cerbos PDP...</ThemedText>}
         {pdpLoadedAt && (
           <ThemedText>
-            Cerbos PDP loaded at: {pdpLoadedAt.toLocaleTimeString()}
+            Cerbos PDP loaded at: {pdpLoadedAt.toISOString()}
           </ThemedText>
         )}
 
