@@ -22,3 +22,11 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.ownerId == P.id
+
+    - actions: ["publish"]
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.ownerId == P.id
