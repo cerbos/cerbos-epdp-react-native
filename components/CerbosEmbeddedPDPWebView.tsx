@@ -7,6 +7,7 @@ import { SerializablePDPRequests } from "./CerbosContext";
 import { CheckResourcesResponse as CheckResourcesResponsePB } from "@cerbos/embedded/lib/protobuf/cerbos/response/v1/response";
 import { Effect } from "@cerbos/embedded/lib/protobuf/cerbos/effect/v1/effect";
 
+// Define the component's props interface
 interface CerbosEmbeddedPDPWebViewProps {
   url: string;
   refreshIntervalSeconds: number;
@@ -14,8 +15,8 @@ interface CerbosEmbeddedPDPWebViewProps {
   dom: DOMProps;
   requests: SerializablePDPRequests;
   handleResponse: (response: CheckResourcesResponsePB) => void;
-  handleError: (requestId: string, error: Error) => void; // Add error handler prop
-  handlePDPUpdated: () => void; // Add PDP updated handler prop
+  handleError: (requestId: string, error: Error) => void; // Error handler callback
+  handlePDPUpdated: () => void; // Callback for when the PDP is updated
 }
 
 export default function CerbosEmbeddedPDPWebView({
@@ -27,76 +28,69 @@ export default function CerbosEmbeddedPDPWebView({
   handleError,
   handlePDPUpdated,
 }: CerbosEmbeddedPDPWebViewProps) {
-  const [cerbos, setCerbos] = useState<Embedded | null>(null);
-  const processedRequestIds = useRef(new Set<string>());
+  const [cerbos, setCerbos] = useState<Embedded | null>(null); // Cerbos instance state
+  const processedRequestIds = useRef(new Set<string>()); // Track processed request IDs
 
+  // Initialize and manage the AutoUpdatingLoader
   useEffect(() => {
     let loader: AutoUpdatingLoader | null = null;
+
     try {
       loader = new AutoUpdatingLoader(url, {
         onLoad: (metadata) => {
           console.log(
             `[CerbosWebview] Policy bundle loaded. ${metadata.commit} - ${metadata.builtAt}`
           );
-          handlePDPUpdated();
-          loaded(true);
+          handlePDPUpdated(); // Notify PDP update
+          loaded(true); // Indicate successful loading
         },
         onError: (err) => {
           console.error("[CerbosWebview] Error loading policy bundle:", err);
-          loaded(false); // Indicate loading failed
+          loaded(false); // Indicate loading failure
         },
         activateOnLoad: true,
         interval: refreshIntervalSeconds * 1000, // Convert seconds to milliseconds
       });
-      setCerbos(new Embedded(loader));
+      setCerbos(new Embedded(loader)); // Set the Cerbos instance
     } catch (error) {
       console.error(
         "[CerbosWebview] Failed to initialize Cerbos Embedded PDP:",
         error
       );
-      loaded(false);
+      loaded(false); // Indicate initialization failure
     }
 
-    // Cleanup function to stop the loader when the component unmounts
+    // Cleanup function to stop the loader on unmount
     return () => {
       console.log("[CerbosWebview] Stopping policy bundle loader.");
       loader?.stop();
-      setCerbos(null); // Clear the cerbos instance
-      loaded(false); // Set loaded to false on unmount/cleanup
+      setCerbos(null); // Clear the Cerbos instance
+      loaded(false); // Reset loaded state
     };
-  }, [url, refreshIntervalSeconds]); // Dependencies
+  }, [url, refreshIntervalSeconds]); // Re-run if URL or interval changes
 
+  // Process incoming requests
   useEffect(() => {
-    if (!cerbos) {
-      return;
-    }
+    if (!cerbos) return;
 
-    // Process requests that haven't been processed yet
     Object.entries(requests).forEach(async ([requestId, requestData]) => {
       if (processedRequestIds.current.has(requestId)) {
         console.log(
-          `[CerbosWebview] Skipping already processing request: ${requestId}`
+          `[CerbosWebview] Skipping already processed request: ${requestId}`
         );
-        return; // Skip already processed or currently processing requests
+        return; // Skip already processed requests
       }
 
-      // Mark as processing immediately
-      processedRequestIds.current.add(requestId);
+      processedRequestIds.current.add(requestId); // Mark request as processing
       console.log("[CerbosWebview] Processing Cerbos request:", requestId);
 
       try {
-        // Perform the checkResources call with the Protobuf request
-        const response = await cerbos.checkResources(requestData);
+        const response = await cerbos.checkResources(requestData); // Perform the check
         console.log(
           `[CerbosWebview] Request ${requestId} response received successfully`
         );
 
-        console.log(
-          "[CerbosWebview] Auth check result:",
-          JSON.stringify(response)
-        );
-
-        // Pass the Protobuf response back to the context
+        // Transform and pass the response to the handler
         handleResponse({
           requestId: response.requestId,
           cerbosCallId: response.cerbosCallId,
@@ -118,26 +112,24 @@ export default function CerbosEmbeddedPDPWebView({
         handleError(
           requestId,
           error instanceof Error ? error : new Error(String(error))
-        );
+        ); // Pass error to handler
       } finally {
-        // Always remove from processing set regardless of success or failure
-        processedRequestIds.current.delete(requestId);
+        processedRequestIds.current.delete(requestId); // Remove from processing set
       }
     });
-    // Depend on cerbos instance and the requests object
-  }, [cerbos, requests, handleResponse, handleError]);
+  }, [cerbos, requests, handleResponse, handleError]); // Re-run if dependencies change
 
-  // Optional: Clean up processedRequestIds when requests are removed from props
+  // Cleanup stale request IDs when requests are removed
   useEffect(() => {
     const currentRequestIds = new Set(Object.keys(requests));
     const toRemove: string[] = [];
+
     processedRequestIds.current.forEach((id) => {
       if (!currentRequestIds.has(id)) {
         toRemove.push(id);
       }
     });
 
-    // Remove outside the loop to avoid modifying during iteration
     toRemove.forEach((id) => {
       console.log(
         `[CerbosWebview] Cleaning up stale request ID from tracking: ${id}`
@@ -146,6 +138,6 @@ export default function CerbosEmbeddedPDPWebView({
     });
   }, [requests]);
 
-  // Render null or a minimal element as this is primarily a background task component
+  // Render nothing as this is a background task component
   return null;
 }
