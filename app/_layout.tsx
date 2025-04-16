@@ -14,6 +14,7 @@ import { useColorScheme } from "@/hooks/useColorScheme";
 import * as RNWASM from "react-native-webassembly";
 
 import "react-native-get-random-values";
+import { CerbosProvider } from "@/components/CerbosContext";
 global.WebAssembly = RNWASM as any;
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
@@ -41,11 +42,13 @@ export default function RootLayout() {
 
   return (
     <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="+not-found" />
-      </Stack>
-      <StatusBar style="auto" />
+      <CerbosProvider pdpUrl={CERBOS_PDP_URL} updateInterval={60}>
+        <Stack>
+          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          <Stack.Screen name="+not-found" />
+        </Stack>
+        <StatusBar style="auto" />
+      </CerbosProvider>
     </ThemeProvider>
   );
 }

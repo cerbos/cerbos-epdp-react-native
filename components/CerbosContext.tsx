@@ -14,11 +14,12 @@ import { CheckResourcesResponse as CheckResourcesResponsePB } from "@cerbos/embe
 import { CheckResourcesResponse } from "@cerbos/core/src/types/external/CheckResourcesResponse";
 import { checkResourcesResponseFromProtobuf } from "@cerbos/core/src/convert/fromProtobuf";
 import uuid from "react-native-uuid";
-import { ThemedText } from "./ThemedText";
+import { View } from "react-native";
 
 // Define the shape of the context
 interface CerbosContextType {
   isLoaded: boolean;
+  pdpLoadedAt: Date | undefined;
   checkResources: (
     request: Omit<CheckResourcesRequest, "requestId">
   ) => Promise<CheckResourcesResponse>;
@@ -27,6 +28,7 @@ interface CerbosContextType {
 // Create a context with a default value
 const CerbosContext = createContext<CerbosContextType>({
   isLoaded: false,
+  pdpLoadedAt: undefined,
   checkResources: async () => {
     throw new Error("Cerbos PDP not initialized");
   },
@@ -59,11 +61,12 @@ export const CerbosProvider: React.FC<CerbosProviderProps> = ({
   children,
   pdpUrl,
   updateInterval = 60, // default update interval in seconds
-  requestTimeout = 10000, // default timeout to 10 seconds
-  batchInterval = 500, // default batch interval to 500ms
+  requestTimeout = 2000, // default timeout to 2 seconds
+  batchInterval = 50, // default batch interval to 50ms
   maxBatchSize = 10, // default max batch size to 10 requests
 }) => {
   const [isReady, setIsReady] = useState(false);
+  const [pdpLoadedAt, setPDPLoadedAt] = useState<Date | undefined>(undefined);
   // Store pending requests with their resolve/reject handlers
   const [requests, setRequests] = useState<PDPRequests>({});
   // Store batched requests that will be passed to WebView
@@ -336,25 +339,28 @@ export const CerbosProvider: React.FC<CerbosProviderProps> = ({
 
   const value = {
     checkResources,
+    pdpLoadedAt,
     isLoaded: isReady,
   };
 
   return (
     <CerbosContext.Provider value={value}>
       {children}
-      <ThemedText>{JSON.stringify(stats.current)}</ThemedText>
-      <CerbosEmbeddedPDPWebView
-        url={pdpUrl}
-        refreshInterval={updateInterval}
-        // Pass the batched requests to WebView
-        requests={batchedRequests}
-        handleResponse={handleResponse}
-        handleError={handleError}
-        loaded={setIsReady}
-        dom={{
-          matchContents: true,
-        }}
-      />
+      <View style={{ height: 0 }}>
+        <CerbosEmbeddedPDPWebView
+          url={pdpUrl}
+          refreshInterval={updateInterval}
+          handlePDPUpdated={() => {
+            setPDPLoadedAt(new Date());
+          }}
+          // Pass the batched requests to WebView
+          requests={batchedRequests}
+          handleResponse={handleResponse}
+          handleError={handleError}
+          loaded={setIsReady}
+          dom={{ style: { height: 0 }, matchContents: false }}
+        />
+      </View>
     </CerbosContext.Provider>
   );
 };

@@ -5,6 +5,7 @@ import { DOMProps } from "expo/dom";
 import { useEffect, useState, useRef } from "react";
 import { SerializablePDPRequests } from "./CerbosContext";
 import { CheckResourcesResponse as CheckResourcesResponsePB } from "@cerbos/embedded/lib/protobuf/cerbos/response/v1/response";
+import { Effect } from "@cerbos/embedded/lib/protobuf/cerbos/effect/v1/effect";
 
 interface CerbosEmbeddedPDPWebViewProps {
   url: string;
@@ -14,6 +15,7 @@ interface CerbosEmbeddedPDPWebViewProps {
   requests: SerializablePDPRequests;
   handleResponse: (response: CheckResourcesResponsePB) => void;
   handleError: (requestId: string, error: Error) => void; // Add error handler prop
+  handlePDPUpdated: () => void; // Add PDP updated handler prop
 }
 
 export default function CerbosEmbeddedPDPWebView({
@@ -22,7 +24,8 @@ export default function CerbosEmbeddedPDPWebView({
   loaded,
   requests,
   handleResponse,
-  handleError, // Destructure the new prop
+  handleError,
+  handlePDPUpdated,
 }: CerbosEmbeddedPDPWebViewProps) {
   const [cerbos, setCerbos] = useState<Embedded | null>(null);
   const processedRequestIds = useRef(new Set<string>());
@@ -33,6 +36,7 @@ export default function CerbosEmbeddedPDPWebView({
       loader = new AutoUpdatingLoader(url, {
         onLoad: () => {
           console.log("[CerbosWebview] Policy bundle loaded.");
+          handlePDPUpdated();
           loaded(true);
         },
         onError: (err) => {
@@ -84,6 +88,11 @@ export default function CerbosEmbeddedPDPWebView({
           `[CerbosWebview] Request ${requestId} response received successfully`
         );
 
+        console.log(
+          "[CerbosWebview] Auth check result:",
+          JSON.stringify(response)
+        );
+
         // Pass the Protobuf response back to the context
         handleResponse({
           requestId: response.requestId,
@@ -92,7 +101,7 @@ export default function CerbosEmbeddedPDPWebView({
             resource: result.resource,
             meta: result.metadata,
             actions: Object.fromEntries(
-              Object.entries(result.actions).map(([k, v]) => [k, Number(v)])
+              Object.entries(result.actions).map(([k, v]) => [k, Effect[v]])
             ),
             validationErrors: [],
             outputs: [],
@@ -135,11 +144,5 @@ export default function CerbosEmbeddedPDPWebView({
   }, [requests]);
 
   // Render null or a minimal element as this is primarily a background task component
-  return (
-    <div>
-      <p>Cerbos PDP Active: {cerbos ? "Yes" : "No"}</p>
-      <p>Queue: {Object.entries(requests).length}</p>
-      <p>Processing: {processedRequestIds.current.size}</p>
-    </div>
-  );
+  return null;
 }
