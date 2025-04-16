@@ -39,7 +39,7 @@ export default function RootLayout() {
 
   return (
     <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
-      <CerbosProvider pdpUrl={CERBOS_PDP_URL} updateInterval={60}>
+      <CerbosProvider pdpUrl={CERBOS_PDP_URL} updateInterval={10}>
         <Stack>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="+not-found" />
