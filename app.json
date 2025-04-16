@@ -36,8 +36,7 @@
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
         }
-      ],
-      "react-native-webassembly"
+      ]
     ],
     "experiments": {
       "typedRoutes": true
