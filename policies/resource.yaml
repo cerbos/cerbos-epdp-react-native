@@ -5,6 +5,11 @@ resourcePolicy:
   version: "default"
   resource: "resource"
   rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      roles:
+        - ADMIN
+
     - actions: ["read", "create"]
       effect: EFFECT_ALLOW
       roles:
@@ -17,8 +22,3 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.ownerId == P.id
-
-    - actions: ["delete", "update"]
-      effect: EFFECT_ALLOW
-      roles:
-        - ADMIN
