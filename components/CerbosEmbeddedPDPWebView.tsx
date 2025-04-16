@@ -9,7 +9,7 @@ import { Effect } from "@cerbos/embedded/lib/protobuf/cerbos/effect/v1/effect";
 
 interface CerbosEmbeddedPDPWebViewProps {
   url: string;
-  refreshInterval: number;
+  refreshIntervalSeconds: number;
   loaded: (isLoaded: boolean) => void;
   dom: DOMProps;
   requests: SerializablePDPRequests;
@@ -20,7 +20,7 @@ interface CerbosEmbeddedPDPWebViewProps {
 
 export default function CerbosEmbeddedPDPWebView({
   url,
-  refreshInterval,
+  refreshIntervalSeconds,
   loaded,
   requests,
   handleResponse,
@@ -43,7 +43,7 @@ export default function CerbosEmbeddedPDPWebView({
           console.error("[CerbosWebview] Error loading policy bundle:", err);
           loaded(false); // Indicate loading failed
         },
-        interval: refreshInterval * 1000, // Convert seconds to milliseconds
+        interval: refreshIntervalSeconds * 1000, // Convert seconds to milliseconds
       });
       setCerbos(new Embedded(loader));
     } catch (error) {
@@ -61,7 +61,7 @@ export default function CerbosEmbeddedPDPWebView({
       setCerbos(null); // Clear the cerbos instance
       loaded(false); // Set loaded to false on unmount/cleanup
     };
-  }, []); // Dependencies
+  }, [url, refreshIntervalSeconds]); // Dependencies
 
   useEffect(() => {
     if (!cerbos) {

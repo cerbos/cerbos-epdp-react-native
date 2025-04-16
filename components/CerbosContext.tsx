@@ -38,7 +38,7 @@ const CerbosContext = createContext<CerbosContextType>({
 interface CerbosProviderProps {
   children: ReactNode;
   pdpUrl: string;
-  updateInterval?: number;
+  refreshIntervalSeconds?: number;
   requestTimeout?: number; // Optional request timeout in ms
   batchInterval?: number; // Optional batching interval in ms
   maxBatchSize?: number; // Optional maximum batch size
@@ -60,7 +60,7 @@ export type SerializablePDPRequests = Record<string, CheckResourcesRequest>;
 export const CerbosProvider: React.FC<CerbosProviderProps> = ({
   children,
   pdpUrl,
-  updateInterval = 60, // default update interval in seconds
+  refreshIntervalSeconds = 60, // default update interval in seconds
   requestTimeout = 2000, // default timeout to 2 seconds
   batchInterval = 50, // default batch interval to 50ms
   maxBatchSize = 10, // default max batch size to 10 requests
@@ -349,7 +349,7 @@ export const CerbosProvider: React.FC<CerbosProviderProps> = ({
       <View style={{ height: 0 }}>
         <CerbosEmbeddedPDPWebView
           url={pdpUrl}
-          refreshInterval={updateInterval}
+          refreshIntervalSeconds={refreshIntervalSeconds}
           handlePDPUpdated={() => {
             setPDPLoadedAt(new Date());
           }}
