@@ -16,6 +16,7 @@ export function PrincipalPicker({
 }: PrincipalPickerProps) {
   return (
     <ThemedView style={styles.dropdownColumn}>
+      <ThemedText>Principal</ThemedText>
       <SelectDropdown
         data={principals.map((p) => ({ title: p.id, value: p }))}
         defaultValue={{ title: principal.id, value: principal }}

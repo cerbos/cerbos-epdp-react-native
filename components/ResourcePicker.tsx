@@ -13,6 +13,7 @@ interface ResourcePickerProps {
 export function ResourcePicker({ resource, setResource }: ResourcePickerProps) {
   return (
     <ThemedView style={styles.dropdownColumn}>
+      <ThemedText>Resource</ThemedText>
       <SelectDropdown
         data={resources.map((p) => ({ title: p.id, value: p }))}
         defaultValue={{ title: resource.id, value: resource }}
