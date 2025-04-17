@@ -15,20 +15,28 @@ import { CheckResourcesResponse } from "@cerbos/core/src/types/external/CheckRes
 import { checkResourcesResponseFromProtobuf } from "@cerbos/core/src/convert/fromProtobuf";
 import uuid from "react-native-uuid";
 import { View } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import NetInfo from "@react-native-community/netinfo";
+import * as FileSystem from "expo-file-system";
+import { ThemedView } from "./ThemedView";
+import { ThemedText } from "./ThemedText";
+import { BundleMetadata } from "@cerbos/embedded";
 
 // Define the shape of the context provided to consumers
 interface CerbosContextType {
   isLoaded: boolean; // Indicates if the PDP bundle has been loaded at least once
-  pdpLoadedAt: Date | undefined; // Timestamp of the last successful PDP bundle load
+  metadata: PDPMetaData | undefined; // Timestamp of the last successful PDP bundle load
   checkResources: (
     request: Omit<CheckResourcesRequest, "requestId">
   ) => Promise<CheckResourcesResponse>; // Function to authorize resources
 }
 
+type PDPMetaData = { updatedAt: string } & BundleMetadata;
+
 // Create the Cerbos context with default values
 const CerbosContext = createContext<CerbosContextType>({
   isLoaded: false,
-  pdpLoadedAt: undefined,
+  metadata: undefined,
   checkResources: async () => {
     // Default implementation throws an error if used outside a provider
     throw new Error("Cerbos PDP not initialized");
@@ -70,12 +78,97 @@ export const CerbosProvider: React.FC<CerbosProviderProps> = ({
   // State indicating if the WebView has loaded the initial PDP bundle
   const [isReady, setIsReady] = useState(false);
   // State storing the timestamp of the last successful PDP bundle load
-  const [pdpLoadedAt, setPDPLoadedAt] = useState<Date | undefined>(undefined);
+  const [metadata, setMetadata] = useState<PDPMetaData | undefined>(undefined);
   // State holding pending checkResources requests (including promise handlers)
   const [requests, setRequests] = useState<PDPRequests>({});
   // State holding the batch of requests currently being processed by the WebView
   const [batchedRequests, setBatchedRequests] =
     useState<SerializablePDPRequests>({});
+
+  const [pdpBase64, setPdpBase64] = useState<string | undefined>(undefined);
+
+  useEffect(() => {
+    let mounted = true;
+    console.log("[CerbosProvider] Initial fetchAsset effect running.");
+    fetchAsset(pdpUrl)
+      .then(async (localUri) => {
+        if (!mounted) {
+          console.log(
+            "[CerbosProvider] Initial fetchAsset completed but component unmounted."
+          );
+          return;
+        }
+        console.log(
+          "[CerbosProvider] Initial PDP bundle downloaded/verified at:",
+          localUri
+        );
+        try {
+          const b64 = await FileSystem.readAsStringAsync(localUri, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+          console.log(
+            `[CerbosProvider] Initial PDP Base64 loaded (Length: ${b64.length}). Setting state.`
+          );
+          setPdpBase64(b64);
+        } catch (readError) {
+          console.error(
+            "[CerbosProvider] Error reading initial PDP bundle:",
+            readError
+          );
+        }
+      })
+      .catch((err) =>
+        console.error("[CerbosProvider] Error during initial fetchAsset:", err)
+      );
+
+    return () => {
+      console.log("[CerbosProvider] Initial fetchAsset effect cleanup.");
+      mounted = false;
+    };
+  }, [pdpUrl]);
+
+  useEffect(() => {
+    console.log(
+      `[CerbosProvider] Setting up periodic PDP update check (${refreshIntervalSeconds}s interval).`
+    );
+    const intervalId = setInterval(async () => {
+      console.log("[CerbosProvider] Periodic update check running...");
+      try {
+        const localUri = await fetchAsset(pdpUrl);
+        console.log(
+          "[CerbosProvider] Periodic check: Asset fetched/verified at:",
+          localUri
+        );
+        const newB64 = await FileSystem.readAsStringAsync(localUri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+
+        setPdpBase64((currentB64) => {
+          if (newB64 !== currentB64) {
+            console.log(
+              `[CerbosProvider] Periodic check: PDP bundle changed (New length: ${newB64.length}). Updating base64 state.`
+            );
+            return newB64;
+          } else {
+            console.log(
+              "[CerbosProvider] Periodic check: PDP bundle unchanged."
+            );
+            return currentB64;
+          }
+        });
+      } catch (err) {
+        console.error(
+          "[CerbosProvider] Error during periodic fetchAsset/read:",
+          err
+        );
+      }
+    }, refreshIntervalSeconds * 1000);
+
+    return () => {
+      console.log("[CerbosProvider] Clearing periodic PDP update interval.");
+      clearInterval(intervalId);
+    };
+  }, [pdpUrl]);
 
   // Refs for managing timeouts, batching, and stats
   const activeTimeouts = useRef<Record<string, NodeJS.Timeout>>({}); // Stores active setTimeout IDs for request timeouts
@@ -396,10 +489,34 @@ export const CerbosProvider: React.FC<CerbosProviderProps> = ({
   const contextValue = useMemo(
     () => ({
       checkResources,
-      pdpLoadedAt,
+      metadata,
       isLoaded: isReady,
     }),
-    [checkResources, pdpLoadedAt, isReady] // Dependencies for the context value
+    [checkResources, metadata, isReady] // Dependencies for the context value
+  );
+
+  // Log when the provider is rendering and whether the PDP base64 is ready
+  useEffect(() => {
+    console.debug(
+      `[CerbosProvider] Rendering. PDP Base64 ready: ${!!pdpBase64}`
+    );
+  }, [pdpBase64]);
+
+  if (!pdpBase64) {
+    // If the local PDP bundle is not yet loaded, show a loading indicator
+    console.log("[CerbosProvider] Waiting for PDP base64 data...");
+    return (
+      <ThemedView>
+        <ThemedText>Loading Cerbos ePDP...</ThemedText>
+      </ThemedView>
+    );
+  }
+
+  // Log before rendering the WebView component
+  console.debug(
+    `[CerbosProvider] Rendering CerbosEmbeddedPDPWebView. isReady: ${isReady}, Batched requests count: ${
+      Object.keys(batchedRequests).length
+    }`
   );
 
   return (
@@ -409,23 +526,49 @@ export const CerbosProvider: React.FC<CerbosProviderProps> = ({
       {/* It handles the actual PDP loading and request execution */}
       <View style={{ height: 0, width: 0, opacity: 0 }}>
         <CerbosEmbeddedPDPWebView
-          url={pdpUrl}
+          // Pass the base64 encoded PDP bundle
+          pdpb64={pdpBase64}
+          // Pass the refresh interval
           refreshIntervalSeconds={refreshIntervalSeconds}
-          // Callback to update the readiness state when the PDP is loaded/updated
-          handlePDPUpdated={() => {
-            console.log("[CerbosProvider] PDP bundle updated.");
-            setPDPLoadedAt(new Date()); // Update timestamp
+          // Callback invoked by WebView when the PDP bundle is loaded or updated
+          handlePDPUpdated={(meta: PDPMetaData) => {
+            console.log(
+              "[CerbosProvider] handlePDPUpdated callback invoked by WebView.",
+              meta
+            );
+            setMetadata(meta); // Update timestamp
             if (!isReady) {
+              console.log(
+                "[CerbosProvider] Setting isReady to true via handlePDPUpdated."
+              );
               setIsReady(true); // Set ready state on first load
             }
           }}
-          // Pass the current batch of requests to the WebView
+          // Pass the current batch of requests to the WebView for processing
           requests={batchedRequests}
-          // Pass callback handlers for responses and errors
+          // Pass callback handler for successful responses from the WebView
           handleResponse={handleResponse}
+          // Pass callback handler for errors occurring within the WebView
           handleError={handleError}
-          // Callback to set initial readiness (legacy, handlePDPUpdated is preferred)
-          loaded={setIsReady}
+          // Legacy callback invoked by WebView when it considers itself loaded (use handlePDPUpdated preferably)
+          loaded={(loadedState: boolean) => {
+            console.log(
+              `[CerbosProvider] 'loaded' callback invoked by WebView with state: ${loadedState}. Current isReady: ${isReady}`
+            );
+            // Ensure we only set readiness to true, and don't unset it via this legacy callback if handlePDPUpdated already set it.
+            if (loadedState && !isReady) {
+              console.log(
+                "[CerbosProvider] Setting isReady to true via legacy 'loaded' callback."
+              );
+              setIsReady(true);
+            } else if (!loadedState && isReady) {
+              console.warn(
+                "[CerbosProvider] Legacy 'loaded' callback reported false, but provider is already ready. Ignoring."
+              );
+            }
+            // We might consider setting isReady to false if loadedState is false *and* pdpLoadedAt is undefined,
+            // but handlePDPUpdated is the primary mechanism now.
+          }}
           // DOM props for Expo Web compatibility (can be ignored for native)
           dom={{ style: { height: 0 }, matchContents: false }}
         />
@@ -443,3 +586,134 @@ export const useCerbos = (): CerbosContextType => {
   }
   return context;
 };
+
+export async function fetchAsset(url: string) {
+  const filename = "cerbosepdp.wasm";
+  const localUri = `${FileSystem.documentDirectory}${filename}`;
+  const etagKey = `${url}:etag`;
+
+  // Check connectivity
+  const { isConnected } = await NetInfo.fetch();
+  const info = await FileSystem.getInfoAsync(localUri); // Check existence early
+
+  if (!isConnected) {
+    console.log("[fetchAsset] Offline mode detected.");
+    if (info.exists) {
+      console.log(
+        "[fetchAsset] Offline: Returning existing cached asset:",
+        localUri
+      );
+      return localUri;
+    }
+    console.error("[fetchAsset] Offline and no cached asset found.");
+    throw new Error("Offline and no cached asset");
+  }
+  console.log("[fetchAsset] Online mode detected.");
+
+  // Retrieve stored ETag
+  const storedEtag = await AsyncStorage.getItem(etagKey);
+  console.log(`[fetchAsset] Stored ETag: ${storedEtag}`);
+
+  // Prepare headers for conditional GET
+  const headers: HeadersInit = {};
+  if (storedEtag && info.exists) {
+    // Only send If-None-Match if we have an ETag *and* a cached file
+    headers["If-None-Match"] = storedEtag;
+    console.log(
+      `[fetchAsset] Sending GET request with If-None-Match: ${storedEtag}`
+    );
+  } else {
+    console.log(
+      "[fetchAsset] Sending unconditional GET request (no ETag or no cached file)."
+    );
+  }
+
+  try {
+    const response = await fetch(url, { method: "GET", headers });
+    console.log(`[fetchAsset] GET request status: ${response.status}`);
+
+    if (response.status === 304) {
+      // Not Modified
+      console.log(
+        "[fetchAsset] Received 304 Not Modified. Using cached asset:",
+        localUri
+      );
+      if (!info.exists) {
+        console.error(
+          "[fetchAsset] Received 304 but cached asset does not exist. Attempting download again."
+        );
+      } else {
+        return localUri; // Asset is unchanged, return cached URI
+      }
+    }
+
+    if (response.ok) {
+      console.log(
+        `[fetchAsset] Received status ${response.status}. Downloading asset from ${url} to ${localUri}`
+      );
+      const downloadResult = await FileSystem.downloadAsync(url, localUri);
+      console.log(
+        `[fetchAsset] Download complete. Status: ${downloadResult.status}, URI: ${downloadResult.uri}`
+      );
+
+      if (downloadResult.status >= 200 && downloadResult.status < 300) {
+        const remoteEtag = response.headers.get("ETag");
+        console.log(`[fetchAsset] New remote ETag: ${remoteEtag}`);
+
+        if (remoteEtag) {
+          console.log(`[fetchAsset] Saving new ETag: ${remoteEtag}`);
+          await AsyncStorage.setItem(etagKey, remoteEtag);
+        } else {
+          if (storedEtag) {
+            console.log(
+              `[fetchAsset] Removing stored ETag (no longer provided by server).`
+            );
+            await AsyncStorage.removeItem(etagKey);
+          }
+        }
+        console.log("[fetchAsset] ETag updated/checked in AsyncStorage.");
+        return downloadResult.uri;
+      } else {
+        console.warn(
+          `[fetchAsset] FileSystem.downloadAsync failed with status: ${downloadResult.status}`
+        );
+        if (info.exists) {
+          console.warn(
+            "[fetchAsset] Download failed, returning previously cached asset:",
+            localUri
+          );
+          return localUri;
+        }
+        throw new Error(
+          `Unable to download asset (download status ${downloadResult.status}) and no cache available`
+        );
+      }
+    } else {
+      console.error(
+        `[fetchAsset] Initial GET request failed with status: ${response.status}`
+      );
+      if (info.exists) {
+        console.warn(
+          `[fetchAsset] GET request failed (status ${response.status}), falling back to cached asset:`,
+          localUri
+        );
+        return localUri;
+      }
+      throw new Error(
+        `GET request failed with status ${response.status} and no cache available`
+      );
+    }
+  } catch (error) {
+    console.error("[fetchAsset] Error during fetch/download process:", error);
+    if (info.exists) {
+      console.warn(
+        "[fetchAsset] Network/Download error, falling back to cached asset:",
+        localUri
+      );
+      return localUri;
+    }
+    throw new Error(
+      `Failed to fetch or download asset and no cache available: ${error}`
+    );
+  }
+}
