@@ -23,7 +23,7 @@ resourcePolicy:
         match:
           expr: R.attr.ownerId == P.id
 
-    - actions: ["publish", "newaction"]
+    - actions: ["publish"]
       effect: EFFECT_ALLOW
       roles:
         - USER
