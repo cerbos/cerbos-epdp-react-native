@@ -70,7 +70,7 @@ export type SerializablePDPRequests = Record<string, CheckResourcesRequest>;
 export const CerbosProvider: React.FC<CerbosProviderProps> = ({
   children,
   pdpUrl,
-  refreshIntervalSeconds = 60,
+  refreshIntervalSeconds = 300,
   requestTimeout = 2000,
   batchInterval = 50,
   maxBatchSize = 10,
