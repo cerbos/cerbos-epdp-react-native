@@ -1,6 +1,6 @@
 "use dom";
 
-import { AutoUpdatingLoader, Embedded } from "@cerbos/embedded";
+import { BundleMetadata, Embedded } from "@cerbos/embedded";
 import { DOMProps } from "expo/dom";
 import { useEffect, useState, useRef } from "react";
 import { SerializablePDPRequests } from "./CerbosContext";
@@ -9,18 +9,37 @@ import { Effect } from "@cerbos/embedded/lib/protobuf/cerbos/effect/v1/effect";
 
 // Define the component's props interface
 interface CerbosEmbeddedPDPWebViewProps {
-  url: string;
+  pdpb64: string;
   refreshIntervalSeconds: number;
   loaded: (isLoaded: boolean) => void;
   dom: DOMProps;
   requests: SerializablePDPRequests;
   handleResponse: (response: CheckResourcesResponsePB) => void;
   handleError: (requestId: string, error: Error) => void; // Error handler callback
-  handlePDPUpdated: () => void; // Callback for when the PDP is updated
+  handlePDPUpdated: (metadata: { updatedAt: string } & BundleMetadata) => void; // Callback for when the PDP is updated
+}
+
+function asciiToBinary(str: string) {
+  if (typeof atob === "function") {
+    // this works in the browser
+    return atob(str);
+  } else {
+    // this works in node
+    return new Buffer(str, "base64").toString("binary");
+  }
+}
+
+function decode(encoded: string) {
+  var binaryString = asciiToBinary(encoded);
+  var bytes = new Uint8Array(binaryString.length);
+  for (var i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes.buffer;
 }
 
 export default function CerbosEmbeddedPDPWebView({
-  url,
+  pdpb64,
   refreshIntervalSeconds,
   loaded,
   requests,
@@ -33,25 +52,25 @@ export default function CerbosEmbeddedPDPWebView({
 
   // Initialize and manage the AutoUpdatingLoader
   useEffect(() => {
-    let loader: AutoUpdatingLoader | null = null;
-
+    let mounted = true; // Track if the component is mounted
     try {
-      loader = new AutoUpdatingLoader(url, {
-        onLoad: (metadata) => {
-          console.log(
-            `[CerbosWebview] Policy bundle loaded. ${metadata.commit} - ${metadata.builtAt}`
-          );
-          handlePDPUpdated(); // Notify PDP update
-          loaded(true); // Indicate successful loading
-        },
-        onError: (err) => {
-          console.error("[CerbosWebview] Error loading policy bundle:", err);
-          loaded(false); // Indicate loading failure
-        },
-        activateOnLoad: true,
-        interval: refreshIntervalSeconds * 1000, // Convert seconds to milliseconds
-      });
-      setCerbos(new Embedded(loader)); // Set the Cerbos instance
+      console.log("[CerbosWebview] Starting policy bundle loader...");
+      setCerbos(
+        new Embedded(decode(pdpb64), {
+          onLoad: (metadata) => {
+            console.log(
+              "[CerbosWebview] Cerbos Embedded PDP loaded successfully"
+            );
+            if (mounted) {
+              handlePDPUpdated({
+                updatedAt: new Date().toISOString(), // Pass the current
+                ...metadata, // Pass metadata
+              });
+              loaded(true); // Indicate successful loading
+            }
+          },
+        })
+      ); // Set the Cerbos instance
     } catch (error) {
       console.error(
         "[CerbosWebview] Failed to initialize Cerbos Embedded PDP:",
@@ -63,11 +82,10 @@ export default function CerbosEmbeddedPDPWebView({
     // Cleanup function to stop the loader on unmount
     return () => {
       console.log("[CerbosWebview] Stopping policy bundle loader.");
-      loader?.stop();
       setCerbos(null); // Clear the Cerbos instance
       loaded(false); // Reset loaded state
     };
-  }, [url, refreshIntervalSeconds]); // Re-run if URL or interval changes
+  }, [pdpb64, refreshIntervalSeconds]); // Re-run if URL or interval changes
 
   // Process incoming requests
   useEffect(() => {

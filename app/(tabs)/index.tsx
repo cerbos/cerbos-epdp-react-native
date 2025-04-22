@@ -13,10 +13,9 @@ import {
 import { useEffect, useState } from "react";
 import { Button, ScrollView, StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import SelectDropdown from "react-native-select-dropdown";
 
 export default function HomeScreen() {
-  const { isLoaded, pdpLoadedAt } = useCerbos(); // Access Cerbos context
+  const { isLoaded, metadata } = useCerbos(); // Access Cerbos context
   const [principal, setPrincipal] = useState<Principal>(principals[0]); // Selected principal
   const [resource, setResource] = useState<Resource>(resources[0]); // Selected resource
 
@@ -44,10 +43,15 @@ export default function HomeScreen() {
         />
 
         {/* Display PDP load timestamp */}
-        {pdpLoadedAt && (
-          <ThemedText style={styles.timestampText}>
-            Cerbos PDP loaded at: {pdpLoadedAt.toISOString()}
-          </ThemedText>
+        {metadata && (
+          <>
+            <ThemedText style={styles.timestampText}>
+              Cerbos PDP loaded at: {metadata.updatedAt}
+            </ThemedText>
+            <ThemedText style={styles.timestampText}>
+              Policy Commit: {metadata.commit}
+            </ThemedText>
+          </>
         )}
       </SafeAreaView>
     </ScrollView>
