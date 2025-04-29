@@ -21,6 +21,7 @@ import * as FileSystem from "expo-file-system";
 import { ThemedView } from "./ThemedView";
 import { ThemedText } from "./ThemedText";
 import { BundleMetadata } from "@cerbos/embedded";
+import { DecisionLogEntry } from "@cerbos/core";
 
 // Define the shape of the context provided to consumers
 interface CerbosContextType {
@@ -51,6 +52,7 @@ interface CerbosProviderProps {
   requestTimeout?: number; // Max time to wait for a checkResources response (default: 2000ms)
   batchInterval?: number; // Time to wait before sending a batch of requests (default: 50ms)
   maxBatchSize?: number; // Max number of requests per batch (default: 10)
+  onDecision?: (decision: DecisionLogEntry) => void; // Callback for decision logs
 }
 
 // Structure to hold pending checkResources requests along with their promise handlers
@@ -74,6 +76,7 @@ export const CerbosProvider: React.FC<CerbosProviderProps> = ({
   requestTimeout = 2000,
   batchInterval = 50,
   maxBatchSize = 10,
+  onDecision,
 }) => {
   // State indicating if the WebView has loaded the initial PDP bundle
   const [isReady, setIsReady] = useState(false);
@@ -569,6 +572,8 @@ export const CerbosProvider: React.FC<CerbosProviderProps> = ({
             // We might consider setting isReady to false if loadedState is false *and* pdpLoadedAt is undefined,
             // but handlePDPUpdated is the primary mechanism now.
           }}
+          // Pass callback handler for decision logs (if needed)
+          handleDecisionLog={onDecision}
           // DOM props for Expo Web compatibility (can be ignored for native)
           dom={{ style: { height: 0 }, matchContents: false }}
         />

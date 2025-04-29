@@ -6,6 +6,7 @@ import { useEffect, useState, useRef } from "react";
 import { SerializablePDPRequests } from "./CerbosContext";
 import { CheckResourcesResponse as CheckResourcesResponsePB } from "@cerbos/embedded/lib/protobuf/cerbos/response/v1/response";
 import { Effect } from "@cerbos/embedded/lib/protobuf/cerbos/effect/v1/effect";
+import { DecisionLogEntry } from "@cerbos/core";
 
 // Define the component's props interface
 interface CerbosEmbeddedPDPWebViewProps {
@@ -15,6 +16,7 @@ interface CerbosEmbeddedPDPWebViewProps {
   dom: DOMProps;
   requests: SerializablePDPRequests;
   handleResponse: (response: CheckResourcesResponsePB) => void;
+  handleDecisionLog?: (decision: DecisionLogEntry) => void;
   handleError: (requestId: string, error: Error) => void; // Error handler callback
   handlePDPUpdated: (metadata: { updatedAt: string } & BundleMetadata) => void; // Callback for when the PDP is updated
 }
@@ -25,7 +27,7 @@ function asciiToBinary(str: string) {
     return atob(str);
   } else {
     // this works in node
-    return new Buffer(str, "base64").toString("binary");
+    return Buffer.from(str, "base64").toString("binary");
   }
 }
 
@@ -45,6 +47,7 @@ export default function CerbosEmbeddedPDPWebView({
   requests,
   handleResponse,
   handleError,
+  handleDecisionLog,
   handlePDPUpdated,
 }: CerbosEmbeddedPDPWebViewProps) {
   const [cerbos, setCerbos] = useState<Embedded | null>(null); // Cerbos instance state
@@ -68,6 +71,9 @@ export default function CerbosEmbeddedPDPWebView({
               });
               loaded(true); // Indicate successful loading
             }
+          },
+          onDecision(entry) {
+            handleDecisionLog?.(entry); // Pass decision log entry to handler
           },
         })
       ); // Set the Cerbos instance
