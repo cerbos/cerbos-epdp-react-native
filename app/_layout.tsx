@@ -39,7 +39,13 @@ export default function RootLayout() {
 
   return (
     <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
-      <CerbosProvider pdpUrl={CERBOS_PDP_URL} refreshIntervalSeconds={300}>
+      <CerbosProvider
+        pdpUrl={CERBOS_PDP_URL}
+        refreshIntervalSeconds={300}
+        onDecision={(entry) => {
+          console.log("Audit Log", entry);
+        }}
+      >
         <Stack>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="+not-found" />
