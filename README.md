@@ -2,7 +2,7 @@
 
 This is an standard [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app). Added to this is a reference implementation of calling the `checkResources` call on an ePDP from Cerbos Hub which is cached locally.
 
-Unfortunately, React Native does not have native support for WebAssembly so in order to use this a `react-native-webview` is created and the ePDP is loaded into it. Expo takes care of the bundling this local HTML file with the correct SDK implemeented. The `CerbosProvider` create a context which handles marshalling messages between the RN app and the webview.
+Unfortunately, React Native does not have native support for WebAssembly so in order to use this a `react-native-webview` is created and the ePDP is loaded into it. Expo takes care of the bundling this local HTML file with the correct SDK implemeented. The `CerbosProvider` create a context which handles marshalling messages between the RN app and the webview. It also exposed the `onDecision` callback for capturing the decision logs.
 
 Offline support is handled via caching the latest retrieved ePDP stored on device in async storage. By default a check will be made every 5 minutes for a new version, but the app will continue to serve the last avaliable local version should a network connection be unavailable.
 
