@@ -8,7 +8,9 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "build:webview-assets": "node ./scripts/build-cerbos-webview-assets.mjs",
+    "postinstall": "npm run build:webview-assets"
   },
   "dependencies": {
     "@cerbos/embedded-client": "^0.2.0",
@@ -42,6 +44,8 @@
   },
   "devDependencies": {
     "@types/react": "~19.1.0",
+    "events": "^3.3.0",
+    "esbuild": "^0.25.10",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~10.0.0",
     "typescript": "~5.9.2"

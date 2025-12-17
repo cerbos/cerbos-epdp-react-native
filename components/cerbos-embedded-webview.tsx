@@ -1,18 +1,24 @@
 import React, {
   forwardRef,
   useCallback,
+  useEffect,
   useImperativeHandle,
-  useMemo,
   useRef,
   useState,
 } from 'react';
-import type { StyleProp, ViewStyle } from 'react-native';
+import { Platform, type StyleProp, type ViewStyle } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
+import { Asset } from 'expo-asset';
+import * as FileSystem from 'expo-file-system/legacy';
+
+import embeddedClientBundleAsset from '../assets/cerbos/embedded-client.bundle.txt';
+import embeddedServerWasmAsset from '@cerbos/embedded-server/lib/server.wasm';
 
 type SerializedError = { name: string; message: string; stack?: string };
 
 type RpcRequest =
   | { type: 'rpc'; id: string; method: 'init'; params: CerbosInitOptions }
+  | { type: 'rpc'; id: string; method: 'wasmUpload'; params: WasmUploadParams }
   | { type: 'rpc'; id: string; method: 'checkResource'; params: unknown };
 
 type RpcResponse =
@@ -25,7 +31,14 @@ export type CerbosInitOptions = {
   hubClientId?: string;
   hubClientSecret?: string;
   hubBaseUrl?: string;
-  wasmUrl?: string;
+  wasmBase64?: string;
+};
+
+type WasmUploadParams = {
+  uploadId: string;
+  index: number;
+  total: number;
+  chunk: string;
 };
 
 export type CerbosWebViewHandle = {
@@ -34,18 +47,90 @@ export type CerbosWebViewHandle = {
   checkResource: (request: unknown) => Promise<unknown>;
 };
 
-export function defaultWasmUrl() {
-  return 'https://unpkg.com/@cerbos/embedded-server@0.2.0/lib/server.wasm';
-}
-
 function createRequestId() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function getBridgeHtml() {
-  const embeddedClientUrl =
-    'https://esm.sh/@cerbos/embedded-client@0.2.0?bundle&target=es2020';
+async function readAssetString(moduleId: number, encoding?: FileSystem.EncodingType) {
+  const asset = Asset.fromModule(moduleId);
+  await asset.downloadAsync();
+  const uri = asset.localUri ?? asset.uri;
+  return await FileSystem.readAsStringAsync(uri, encoding ? { encoding } : undefined);
+}
 
+function getLoadingHtml() {
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cerbos Embedded Runtime</title>
+    <style>
+      html, body { margin: 0; padding: 0; font-family: -apple-system, system-ui, sans-serif; }
+      body { padding: 10px; }
+      .muted { color: #666; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <div>Cerbos Embedded Runtime</div>
+    <div class="muted">Loading bundled assets…</div>
+  </body>
+</html>`;
+}
+
+function getErrorHtml(errorMessage: string) {
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cerbos Embedded Runtime</title>
+    <style>
+      html, body { margin: 0; padding: 0; font-family: -apple-system, system-ui, sans-serif; }
+      body { padding: 10px; }
+      .muted { color: #666; font-size: 12px; }
+      pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <div>Cerbos Embedded Runtime</div>
+    <div class="muted">Failed to load bundled assets.</div>
+    <pre id="error"></pre>
+    <script>
+      document.getElementById("error").textContent = ${JSON.stringify(errorMessage)};
+
+      function post(msg) {
+        try {
+          window.ReactNativeWebView?.postMessage(JSON.stringify(msg));
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      function receive(event) {
+        const data = event?.data;
+        if (typeof data !== "string") return;
+        let msg;
+        try { msg = JSON.parse(data); } catch { return; }
+        if (!msg || msg.type !== "rpc") return;
+        post({
+          type: "rpcResponse",
+          id: msg.id,
+          ok: false,
+          error: { name: "Error", message: ${JSON.stringify(errorMessage)} },
+        });
+      }
+
+      document.addEventListener("message", receive);
+      window.addEventListener("message", receive);
+
+      post({ type: "ready" });
+    </script>
+  </body>
+</html>`;
+}
+
+function getBridgeHtml({ embeddedClientBundle }: { embeddedClientBundle?: string | null }) {
   return `<!doctype html>
 <html>
   <head>
@@ -61,7 +146,8 @@ function getBridgeHtml() {
   <body>
     <div>Cerbos Embedded Runtime</div>
     <div class="muted" id="status">Loading…</div>
-    <script type="module">
+    ${embeddedClientBundle ? `<script>(0,eval)(${JSON.stringify(embeddedClientBundle)});</script>` : ''}
+    <script>
       const statusEl = document.getElementById("status");
 
       function setStatus(text) {
@@ -92,12 +178,8 @@ function getBridgeHtml() {
         return bytes;
       }
 
-      async function fetchWasmBytes(wasmUrl) {
-        const res = await fetch(wasmUrl);
-        if (!res.ok) throw new Error(\`Failed to fetch WASM (\${res.status}) from \${wasmUrl}\`);
-        const buf = await res.arrayBuffer();
-        return new Uint8Array(buf);
-      }
+      let bundledWasmBase64 = null;
+      const wasmUploads = new Map();
 
       let Embedded = null;
       let cerbos = null;
@@ -105,18 +187,20 @@ function getBridgeHtml() {
       async function loadSdk() {
         if (Embedded) return;
         setStatus("Loading SDK…");
-        const mod = await import("${embeddedClientUrl}");
-        Embedded = mod.Embedded;
+        if (!globalThis.__cerbosEmbedded?.Embedded) {
+          throw new Error("Missing bundled @cerbos/embedded-client. Ensure assets/cerbos/embedded-client.bundle.txt exists and is up to date.");
+        }
+        Embedded = globalThis.__cerbosEmbedded.Embedded;
         setStatus("SDK loaded.");
       }
 
       async function initClient(params) {
         await loadSdk();
 
-        const wasmUrl = params.wasmUrl || "${defaultWasmUrl()}";
-        const wasm = params.wasmBase64
-          ? decodeBase64ToUint8Array(params.wasmBase64)
-          : await fetchWasmBytes(wasmUrl);
+        const wasmBase64 = params.wasmBase64 || bundledWasmBase64;
+        const wasm = wasmBase64
+          ? decodeBase64ToUint8Array(wasmBase64)
+          : (() => { throw new Error("Missing WASM. Ensure the app uploads the bundled @cerbos/embedded-server WASM before calling init."); })();
 
         const { ruleId, hubClientId, hubClientSecret, hubBaseUrl } = params;
         const policies = hubClientId && hubClientSecret
@@ -142,7 +226,37 @@ function getBridgeHtml() {
         };
       }
 
-      const handlers = { init: initClient, checkResource };
+      async function wasmUpload(params) {
+        const { uploadId, index, total, chunk } = params || {};
+        if (!uploadId || typeof index !== "number" || typeof total !== "number" || typeof chunk !== "string") {
+          throw new Error("Invalid wasmUpload params");
+        }
+
+        let upload = wasmUploads.get(uploadId);
+        if (!upload) {
+          upload = { total, chunks: new Array(total).fill(""), received: 0 };
+          wasmUploads.set(uploadId, upload);
+        }
+
+        if (upload.total !== total) {
+          throw new Error("Mismatched upload total");
+        }
+
+        if (!upload.chunks[index]) {
+          upload.received++;
+        }
+        upload.chunks[index] = chunk;
+
+        if (upload.received >= upload.total) {
+          bundledWasmBase64 = upload.chunks.join("");
+          wasmUploads.delete(uploadId);
+          return { done: true };
+        }
+
+        return { done: false, received: upload.received, total: upload.total };
+      }
+
+      const handlers = { init: initClient, checkResource, wasmUpload };
 
       async function handleRpc(msg) {
         const { id, method, params } = msg;
@@ -190,7 +304,41 @@ export const CerbosEmbeddedWebView = forwardRef<
   const readyResolversRef = useRef<(() => void)[]>([]);
   const [isReady, setIsReady] = useState(false);
 
-  const html = useMemo(() => getBridgeHtml(), []);
+  const [html, setHtml] = useState(() => getLoadingHtml());
+  const wasmBase64Ref = useRef<string | null>(null);
+  const wasmBase64PromiseRef = useRef<Promise<string | null> | null>(null);
+  const wasmUploadedRef = useRef(false);
+  const wasmUploadPromiseRef = useRef<Promise<void> | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      if (Platform.OS === 'web') return;
+      try {
+        const embeddedClientBundle = await readAssetString(embeddedClientBundleAsset);
+        if (!cancelled) {
+          setIsReady(false);
+          readyResolversRef.current = [];
+
+          for (const pending of pendingRef.current.values()) {
+            clearTimeout(pending.timeout);
+            pending.reject(new Error('WebView reloaded'));
+          }
+          pendingRef.current.clear();
+
+          setHtml(getBridgeHtml({ embeddedClientBundle }));
+        }
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        if (!cancelled) setHtml(getErrorHtml(message));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const resolveReady = useCallback(() => {
     setIsReady(true);
@@ -223,6 +371,57 @@ export const CerbosEmbeddedWebView = forwardRef<
     },
     [awaitReady],
   );
+
+  const getBundledWasmBase64 = useCallback(async () => {
+    if (Platform.OS === 'web') return null;
+
+    if (wasmBase64Ref.current) return wasmBase64Ref.current;
+    wasmBase64PromiseRef.current ??= (async () => {
+      try {
+        const wasmBase64 = await readAssetString(embeddedServerWasmAsset, FileSystem.EncodingType.Base64);
+        wasmBase64Ref.current = wasmBase64;
+        return wasmBase64;
+      } catch {
+        return null;
+      }
+    })();
+
+    return await wasmBase64PromiseRef.current;
+  }, []);
+
+  const ensureBundledWasmUploaded = useCallback(async () => {
+    if (Platform.OS === 'web') return;
+    if (wasmUploadedRef.current) return;
+
+    wasmUploadPromiseRef.current ??= (async () => {
+      const wasmBase64 = await getBundledWasmBase64();
+      if (!wasmBase64) return;
+
+      const chunkSize = 256 * 1024;
+      const total = Math.ceil(wasmBase64.length / chunkSize);
+      const uploadId = createRequestId();
+
+      for (let index = 0; index < total; index++) {
+        const chunk = wasmBase64.slice(
+          index * chunkSize,
+          Math.min((index + 1) * chunkSize, wasmBase64.length),
+        );
+        const message: RpcRequest = {
+          type: 'rpc',
+          id: createRequestId(),
+          method: 'wasmUpload',
+          params: { uploadId, index, total, chunk },
+        };
+        await postRpc(message, 120_000);
+      }
+
+      wasmUploadedRef.current = true;
+      wasmBase64Ref.current = null;
+      wasmBase64PromiseRef.current = null;
+    })();
+
+    await wasmUploadPromiseRef.current;
+  }, [getBundledWasmBase64, postRpc]);
 
   const onMessage = useCallback(
     (event: WebViewMessageEvent) => {
@@ -266,7 +465,16 @@ export const CerbosEmbeddedWebView = forwardRef<
     () => ({
       isReady: () => isReady,
       init: async (options: CerbosInitOptions) => {
-        const message: RpcRequest = { type: 'rpc', id: createRequestId(), method: 'init', params: options };
+        if (!options.wasmBase64) {
+          await ensureBundledWasmUploaded();
+        }
+
+        const message: RpcRequest = {
+          type: 'rpc',
+          id: createRequestId(),
+          method: 'init',
+          params: options,
+        };
         await postRpc(message);
       },
       checkResource: async (request: unknown) => {
@@ -279,7 +487,7 @@ export const CerbosEmbeddedWebView = forwardRef<
         return await postRpc(message);
       },
     }),
-    [isReady, postRpc],
+    [ensureBundledWasmUploaded, isReady, postRpc],
   );
 
   return (

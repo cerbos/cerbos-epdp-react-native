@@ -2,18 +2,17 @@ import React, { useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { CerbosEmbeddedWebView, defaultWasmUrl, type CerbosWebViewHandle } from '@/components/cerbos-embedded-webview';
+import { CerbosEmbeddedWebView, type CerbosWebViewHandle } from '@/components/cerbos-embedded-webview';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 
 export default function HomeScreen() {
   const webViewRef = useRef<CerbosWebViewHandle>(null);
 
-  const [ruleId, setRuleId] = useState('');
+  const [ruleId, setRuleId] = useState('AVGB9RP6HFBL');
   const [hubClientId, setHubClientId] = useState('');
   const [hubClientSecret, setHubClientSecret] = useState('');
   const [hubBaseUrl, setHubBaseUrl] = useState('https://api.cerbos.cloud');
-  const [wasmUrl, setWasmUrl] = useState(defaultWasmUrl());
 
   const [isInitializing, setIsInitializing] = useState(false);
   const [isCalling, setIsCalling] = useState(false);
@@ -23,18 +22,34 @@ export default function HomeScreen() {
     () =>
       JSON.stringify(
         {
-          principal: {
-            id: 'user@example.com',
-            roles: ['USER'],
-            attr: { tier: 'PREMIUM' },
+          "requestId": "06fa7602-53e4-406a-9fc7-6fcb2a96c20d",
+          "resource": {
+            "kind": "mcp::server",
+            "id": "tools/call",
+            "attr": {
+              "arguments": {
+                "query": "airlines"
+              },
+              "name": "search_expenses"
+            }
           },
-          resource: {
-            kind: 'document',
-            id: '1',
-            attr: { owner: 'user@example.com' },
+          "principal": {
+            "id": "sally",
+            "roles": [
+              "USER"
+            ],
+            "attr": {
+              "department": "SALES",
+              "name": "Sally Sales",
+              "organizations": [
+                "ACME"
+              ],
+              "region": "EMEA"
+            }
           },
-          actions: ['view', 'edit'],
-          includeMetadata: true,
+          "actions": [
+            "tools/call"
+          ]
         },
         null,
         2,
@@ -58,7 +73,6 @@ export default function HomeScreen() {
         hubClientId: hubClientId.trim() || undefined,
         hubClientSecret: hubClientSecret.trim() || undefined,
         hubBaseUrl: hubBaseUrl.trim() || undefined,
-        wasmUrl: wasmUrl.trim() || undefined,
       });
       Alert.alert('Initialized', 'Embedded client initialized inside the WebView.');
     } catch (e) {
@@ -136,16 +150,6 @@ export default function HomeScreen() {
             autoCapitalize="none"
             autoCorrect={false}
             placeholder="https://api.cerbos.cloud"
-          />
-
-          <ThemedText style={styles.label}>WASM URL</ThemedText>
-          <TextInput
-            style={styles.input}
-            value={wasmUrl}
-            onChangeText={setWasmUrl}
-            autoCapitalize="none"
-            autoCorrect={false}
-            placeholder={defaultWasmUrl()}
           />
 
           <Pressable style={[styles.button, isInitializing && styles.buttonDisabled]} disabled={isInitializing} onPress={init}>
