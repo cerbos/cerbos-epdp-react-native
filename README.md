@@ -2,6 +2,31 @@
 
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
 
+## Cerbos Embedded (WebView)
+
+This app includes a simple demo that runs `@cerbos/embedded-client` inside a `react-native-webview` and uses `postMessage` to invoke methods (currently `checkResource`) from the React Native UI.
+
+- UI: `app/(tabs)/index.tsx`
+- WebView bridge + RPC: `components/cerbos-embedded-webview.tsx`
+
+### How it works
+
+- The WebView loads a tiny HTML page (inline) that `import()`s `@cerbos/embedded-client` (via `esm.sh`) and fetches the Cerbos WASM binary (default: `unpkg.com/@cerbos/embedded-server/.../server.wasm`).
+- The React Native side sends JSON-RPC-like messages to the WebView, and the WebView replies with the result (or a serialized error).
+
+### Running the demo
+
+1. Start the app (`npx expo start`) and open the Home tab.
+2. Enter your Cerbos Hub `ruleId` (and optionally Hub client credentials).
+3. Tap **Init Embedded Client**, then **Run checkResource**.
+
+Note: the device/emulator running the app must be able to reach the Hub API and the WASM URL you configured.
+
+### Production notes
+
+- For offline/reproducible builds, avoid loading the SDK/WASM from public CDNs; bundle them with the app and update `components/cerbos-embedded-webview.tsx` to load from local assets.
+- Don’t hardcode Hub credentials in the app; use a secure provisioning mechanism appropriate for your threat model.
+
 ## Get started
 
 1. Install dependencies
