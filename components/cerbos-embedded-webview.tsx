@@ -465,8 +465,8 @@ type Pending = {
 
 export const CerbosEmbeddedWebView = forwardRef<
   CerbosWebViewHandle,
-  { style?: StyleProp<ViewStyle> }
->(({ style }, ref) => {
+  { style?: StyleProp<ViewStyle>; containerStyle?: StyleProp<ViewStyle> }
+>(({ style, containerStyle }, ref) => {
   const webViewRef = useRef<WebView>(null);
   const pendingRef = useRef(new Map<string, Pending>());
   const callbacksRef = useRef(new Map<string, CerbosCallbacks[keyof CerbosCallbacks]>());
@@ -749,6 +749,7 @@ export const CerbosEmbeddedWebView = forwardRef<
     <WebView
       ref={webViewRef}
       style={style}
+      containerStyle={containerStyle}
       originWhitelist={['*']}
       javaScriptEnabled
       domStorageEnabled
