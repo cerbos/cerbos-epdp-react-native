@@ -4,7 +4,7 @@ This is an [Expo](https://expo.dev) project created with [`create-expo-app`](htt
 
 ## Cerbos Embedded (WebView)
 
-This app includes a simple demo that runs `@cerbos/embedded-client` inside a `react-native-webview` and uses `postMessage` to invoke methods (currently `checkResource`) from the React Native UI.
+This app includes a simple demo that runs `@cerbos/embedded-client` inside a `react-native-webview` and uses `postMessage` to invoke methods (`checkResource`, `checkResources`, `planResources`) from the React Native UI.
 
 - UI: `app/(tabs)/index.tsx`
 - WebView bridge + RPC: `components/cerbos-embedded-webview.tsx`
@@ -16,11 +16,19 @@ This app includes a simple demo that runs `@cerbos/embedded-client` inside a `re
 - The React Native side sends JSON-RPC-like messages to the WebView, and the WebView replies with the result (or a serialized error).
  - There is no CDN/network fallback for the SDK or WASM (only the Hub policy fetch uses the network).
 
+### Options and callbacks
+
+`app/(tabs)/index.tsx` lets you provide:
+
+- Embedded client options as JSON (e.g. `schemaEnforcement`, `globals`, `headers`, `userAgent`, `onValidationError`).
+- Policy loader options as JSON (e.g. `scopes`, `interval`, `activateOnLoad`).
+- Native callback handlers (e.g. `onDecision`, `onValidationError`, `decodeJWTPayload`, policy `onUpdate`) that are registered locally and invoked from the WebView via `postMessage`.
+
 ### Running the demo
 
 1. Start the app (`npx expo start`) and open the Home tab.
 2. Enter your Cerbos Hub `ruleId` (and optionally Hub client credentials).
-3. Tap **Init Embedded Client**, then **Run checkResource**.
+3. Tap **Init Embedded Client**, then run **checkResource**, **checkResources**, or **planResources**.
 
 Note: the device/emulator running the app must be able to reach the Hub API and the WASM URL you configured.
 
