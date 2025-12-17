@@ -13,15 +13,29 @@ import * as FileSystem from 'expo-file-system/legacy';
 
 import embeddedClientBundleAsset from '../assets/cerbos/embedded-client.bundle.txt';
 import embeddedServerWasmAsset from '@cerbos/embedded-server/lib/server.wasm';
+import type {
+  Options as EmbeddedClientOptions,
+  PolicyLoaderOptions,
+  DecodeJWTPayload,
+  DecodedJWTPayload,
+} from '@cerbos/embedded-client';
+import type {
+  CheckResourceRequest,
+  CheckResourcesRequest,
+  PlanResourcesRequest,
+  DecisionLogEntry,
+  ValidationError,
+  NotOK,
+} from '@cerbos/core';
 
 type SerializedError = { name: string; message: string; stack?: string };
 
 type RpcRequest =
   | { type: 'rpc'; id: string; method: 'init'; params: CerbosInitParamsPayload }
   | { type: 'rpc'; id: string; method: 'wasmUpload'; params: WasmUploadParams }
-  | { type: 'rpc'; id: string; method: 'checkResource'; params: unknown }
-  | { type: 'rpc'; id: string; method: 'checkResources'; params: unknown }
-  | { type: 'rpc'; id: string; method: 'planResources'; params: unknown };
+  | { type: 'rpc'; id: string; method: 'checkResource'; params: CheckResourceRequest }
+  | { type: 'rpc'; id: string; method: 'checkResources'; params: CheckResourcesRequest }
+  | { type: 'rpc'; id: string; method: 'planResources'; params: PlanResourcesRequest };
 
 type RpcResponse =
   | { type: 'ready' }
@@ -49,26 +63,26 @@ export type CerbosInitOptions = {
 };
 
 export type EmbeddedClientOptionsPayload = {
-  headers?: Record<string, string> | [string, string][];
-  userAgent?: string;
-  defaultPolicyVersion?: string;
-  globals?: Record<string, unknown>;
-  lenientScopeSearch?: boolean;
-  schemaEnforcement?: 'none' | 'warn' | 'reject';
+  headers?: EmbeddedClientOptions['headers'];
+  userAgent?: EmbeddedClientOptions['userAgent'];
+  defaultPolicyVersion?: EmbeddedClientOptions['defaultPolicyVersion'];
+  globals?: EmbeddedClientOptions['globals'];
+  lenientScopeSearch?: EmbeddedClientOptions['lenientScopeSearch'];
+  schemaEnforcement?: EmbeddedClientOptions['schemaEnforcement'];
   onValidationError?: 'throw' | 'callback' | 'return';
 };
 
 export type PolicyOptionsPayload = {
-  scopes?: string[];
-  activateOnLoad?: boolean;
-  interval?: number;
+  scopes?: PolicyLoaderOptions['scopes'];
+  activateOnLoad?: PolicyLoaderOptions['activateOnLoad'];
+  interval?: PolicyLoaderOptions['interval'];
 };
 
 export type CerbosCallbacks = {
-  onDecision?: (entry: unknown) => void | Promise<void>;
-  onValidationError?: (validationErrors: unknown) => void | Promise<void>;
-  decodeJWTPayload?: (jwt: unknown) => Promise<Record<string, unknown>>;
-  onPolicyUpdate?: (error: unknown) => void | Promise<void>;
+  onDecision?: (entry: DecisionLogEntry) => void | Promise<void>;
+  onValidationError?: (validationErrors: ValidationError[]) => void | Promise<void>;
+  decodeJWTPayload?: (jwt: Parameters<DecodeJWTPayload>[0]) => Promise<DecodedJWTPayload> | DecodedJWTPayload;
+  onPolicyUpdate?: (error: NotOK | undefined) => void | Promise<void>;
 };
 
 type CallbackIdsPayload = {
@@ -100,9 +114,9 @@ export type CerbosWebViewHandle = {
       callbacks?: CerbosCallbacks;
     },
   ) => Promise<void>;
-  checkResource: (request: unknown) => Promise<unknown>;
-  checkResources: (request: unknown) => Promise<unknown>;
-  planResources: (request: unknown) => Promise<unknown>;
+  checkResource: (request: CheckResourceRequest) => Promise<unknown>;
+  checkResources: (request: CheckResourcesRequest) => Promise<unknown>;
+  planResources: (request: PlanResourcesRequest) => Promise<unknown>;
 };
 
 function createRequestId() {
@@ -700,7 +714,7 @@ export const CerbosEmbeddedWebView = forwardRef<
         };
         await postRpc(message);
       },
-      checkResource: async (request: unknown) => {
+      checkResource: async (request: CheckResourceRequest) => {
         const message: RpcRequest = {
           type: 'rpc',
           id: createRequestId(),
@@ -709,7 +723,7 @@ export const CerbosEmbeddedWebView = forwardRef<
         };
         return await postRpc(message);
       },
-      checkResources: async (request: unknown) => {
+      checkResources: async (request: CheckResourcesRequest) => {
         const message: RpcRequest = {
           type: 'rpc',
           id: createRequestId(),
@@ -718,7 +732,7 @@ export const CerbosEmbeddedWebView = forwardRef<
         };
         return await postRpc(message);
       },
-      planResources: async (request: unknown) => {
+      planResources: async (request: PlanResourcesRequest) => {
         const message: RpcRequest = {
           type: 'rpc',
           id: createRequestId(),

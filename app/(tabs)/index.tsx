@@ -1,6 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Switch, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import type { CheckResourceRequest, CheckResourcesRequest, JWT, PlanResourcesRequest, Value } from '@cerbos/core';
 
 import {
   CerbosEmbeddedWebView,
@@ -199,10 +200,9 @@ export default function HomeScreen() {
             }
           : undefined,
         decodeJWTPayload: enableDecodeJwtPayload
-          ? async (jwt: unknown) => {
-              const obj = jwt as { token?: string };
-              if (!obj?.token) throw new Error('Missing token');
-              const decoded = decodeJwtPayloadUnsafe(obj.token);
+          ? async (jwt: JWT) => {
+              if (!jwt?.token) throw new Error('Missing token');
+              const decoded = decodeJwtPayloadUnsafe(jwt.token) as Record<string, Value>;
               appendLog(`decodeJWTPayload: decoded ${Object.keys(decoded).length} keys`);
               return decoded;
             }
@@ -237,7 +237,7 @@ export default function HomeScreen() {
     setCallingMethod('checkResource');
     setResponseText('');
     try {
-      const request = JSON.parse(requestText);
+      const request = JSON.parse(requestText) as CheckResourceRequest;
       const result = await webViewRef.current?.checkResource(request);
       setResponseText(JSON.stringify(result, null, 2));
     } catch (e) {
@@ -254,7 +254,7 @@ export default function HomeScreen() {
     setCallingMethod('checkResources');
     setResponseText('');
     try {
-      const request = JSON.parse(checkResourcesText);
+      const request = JSON.parse(checkResourcesText) as CheckResourcesRequest;
       const result = await webViewRef.current?.checkResources(request);
       setResponseText(JSON.stringify(result, null, 2));
     } catch (e) {
@@ -271,7 +271,7 @@ export default function HomeScreen() {
     setCallingMethod('planResources');
     setResponseText('');
     try {
-      const request = JSON.parse(planResourcesText);
+      const request = JSON.parse(planResourcesText) as PlanResourcesRequest;
       const result = await webViewRef.current?.planResources(request);
       setResponseText(JSON.stringify(result, null, 2));
     } catch (e) {
