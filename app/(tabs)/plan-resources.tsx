@@ -1,4 +1,5 @@
-import React from 'react';
+import type { PlanResourcesRequest } from '@cerbos/core';
+import React, { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -6,14 +7,67 @@ import { useCerbosEpdp } from '@/components/cerbos-epdp-context';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 
+const defaultPlanResourcesJson = JSON.stringify(
+  {
+    requestId: 'cc60fdc4-913d-4809-ad2f-55c1506c4f8c',
+    action: 'view',
+    actions: ['view'],
+    principal: {
+      id: 'audrey',
+      roles: ['USER'],
+      attr: {
+        department: 'IT',
+        name: 'Audrey Auditor',
+        organizations: ['ACME'],
+        region: 'EMEA',
+      },
+    },
+    resource: {
+      kind: 'app::expense',
+      scope: 'ACME',
+    },
+  },
+  null,
+  2,
+);
+
+function parseJson<T>(input: string, label: string): T {
+  try {
+    return JSON.parse(input) as T;
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    throw new Error(`${label} is not valid JSON: ${message}`);
+  }
+}
+
+function stringify(value: unknown) {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
 export default function PlanResourcesScreen() {
-  const {
-    planResourcesJson,
-    setPlanResourcesJson,
-    isPlanningResources,
-    planResourcesResult,
-    planResources,
-  } = useCerbosEpdp();
+  const { planResources } = useCerbosEpdp();
+
+  const [planResourcesJson, setPlanResourcesJson] = useState(defaultPlanResourcesJson);
+  const [isPlanningResources, setIsPlanningResources] = useState(false);
+  const [planResourcesResult, setPlanResourcesResult] = useState('');
+
+  const onRun = async () => {
+    setIsPlanningResources(true);
+    setPlanResourcesResult('');
+    try {
+      const request = parseJson<PlanResourcesRequest>(planResourcesJson, 'planResources JSON');
+      const result = await planResources(request);
+      setPlanResourcesResult(stringify(result));
+    } catch (e) {
+      setPlanResourcesResult(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setIsPlanningResources(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -34,7 +88,7 @@ export default function PlanResourcesScreen() {
             textAlignVertical="top"
           />
 
-          <Pressable style={[styles.button, isPlanningResources && styles.buttonDisabled]} disabled={isPlanningResources} onPress={planResources}>
+          <Pressable style={[styles.button, isPlanningResources && styles.buttonDisabled]} disabled={isPlanningResources} onPress={onRun}>
             <ThemedText type="defaultSemiBold">{isPlanningResources ? 'Calling…' : 'Run planResources'}</ThemedText>
           </Pressable>
         </ThemedView>
@@ -80,4 +134,3 @@ const styles = StyleSheet.create({
   },
   resultText: { fontSize: 12, lineHeight: 18 },
 });
-

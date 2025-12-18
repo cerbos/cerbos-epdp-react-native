@@ -1,43 +1,101 @@
-import React from 'react';
+import type { Options as EmbeddedClientOptions, PolicyLoaderOptions } from '@cerbos/embedded-client';
+import React, { useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Switch, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { useCerbosEpdp } from '@/components/cerbos-epdp-context';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { useCerbosEpdp } from '@/components/cerbos-epdp-context';
+
+const defaultEmbeddedOptionsJson = JSON.stringify(
+  {
+    schemaEnforcement: 'warn',
+    lenientScopeSearch: true,
+  },
+  null,
+  2,
+);
+
+const defaultPolicyOptionsJson = JSON.stringify(
+  {
+    scopes: [],
+    activateOnLoad: true,
+    interval: 60,
+  },
+  null,
+  2,
+);
+
+function parseJson<T>(input: string, label: string): T {
+  try {
+    return JSON.parse(input) as T;
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    throw new Error(`${label} is not valid JSON: ${message}`);
+  }
+}
 
 export default function EpdpConfigScreen() {
-  const {
-    ruleId,
-    setRuleId,
-    hubClientId,
-    setHubClientId,
-    hubClientSecret,
-    setHubClientSecret,
-    hubBaseUrl,
-    setHubBaseUrl,
-    embeddedOptionsJson,
-    setEmbeddedOptionsJson,
-    policyOptionsJson,
-    setPolicyOptionsJson,
-    enableOnDecision,
-    setEnableOnDecision,
-    enableOnValidationError,
-    setEnableOnValidationError,
-    enableDecodeJwtPayload,
-    setEnableDecodeJwtPayload,
-    enablePolicyOnUpdate,
-    setEnablePolicyOnUpdate,
-    isInitializing,
-    initError,
-    initSuccess,
-    init,
-  } = useCerbosEpdp();
+  const { init } = useCerbosEpdp();
+
+  const [ruleId, setRuleId] = useState('AVGB9RP6HFBL');
+  const [hubClientId, setHubClientId] = useState('');
+  const [hubClientSecret, setHubClientSecret] = useState('');
+  const [hubBaseUrl, setHubBaseUrl] = useState('https://api.cerbos.cloud');
+  const [embeddedOptionsJson, setEmbeddedOptionsJson] = useState(defaultEmbeddedOptionsJson);
+  const [policyOptionsJson, setPolicyOptionsJson] = useState(defaultPolicyOptionsJson);
+  const [enableOnDecision, setEnableOnDecision] = useState(true);
+  const [enableOnValidationError, setEnableOnValidationError] = useState(false);
+  const [enableDecodeJwtPayload, setEnableDecodeJwtPayload] = useState(false);
+  const [enablePolicyOnUpdate, setEnablePolicyOnUpdate] = useState(false);
+
+  const [isInitializing, setIsInitializing] = useState(false);
+  const [initError, setInitError] = useState('');
+  const [initSuccess, setInitSuccess] = useState('');
 
   const onInit = async () => {
-    const ok = await init();
-    if (ok) {
+    setIsInitializing(true);
+    setInitError('');
+    setInitSuccess('');
+    try {
+      const options = parseJson<
+        Partial<
+          Pick<
+            EmbeddedClientOptions,
+            | 'headers'
+            | 'userAgent'
+            | 'defaultPolicyVersion'
+            | 'globals'
+            | 'lenientScopeSearch'
+            | 'schemaEnforcement'
+            | 'onValidationError'
+          >
+        >
+      >(embeddedOptionsJson || '{}', 'Embedded options JSON');
+
+      const policyOptions = parseJson<Partial<Pick<PolicyLoaderOptions, 'scopes' | 'activateOnLoad' | 'interval'>>>(
+        policyOptionsJson || '{}',
+        'Policy options JSON',
+      );
+
+      await init({
+        ruleId,
+        hubClientId,
+        hubClientSecret,
+        hubBaseUrl,
+        options,
+        policyOptions,
+        enableOnDecision,
+        enableOnValidationError,
+        enableDecodeJwtPayload,
+        enablePolicyOnUpdate,
+      });
+      setInitSuccess(`Initialized at ${new Date().toISOString()}`);
       Alert.alert('Initialized', 'ePDP initialized inside the WebView.');
+    } catch (e) {
+      setInitError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setIsInitializing(false);
     }
   };
 
@@ -128,7 +186,7 @@ export default function EpdpConfigScreen() {
             <Switch value={enableOnDecision} onValueChange={setEnableOnDecision} />
           </View>
           <View style={styles.toggleRow}>
-            <ThemedText>onValidationError (set onValidationError: {'"callback"'})</ThemedText>
+            <ThemedText>onValidationError (event log)</ThemedText>
             <Switch value={enableOnValidationError} onValueChange={setEnableOnValidationError} />
           </View>
           <View style={styles.toggleRow}>

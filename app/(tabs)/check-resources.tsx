@@ -1,4 +1,5 @@
-import React from 'react';
+import type { CheckResourcesRequest } from '@cerbos/core';
+import React, { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -6,14 +7,56 @@ import { useCerbosEpdp } from '@/components/cerbos-epdp-context';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 
+const defaultCheckResourcesJson = JSON.stringify(
+  {
+    principal: { id: 'user@example.com', roles: ['USER'], attr: { tier: 'PREMIUM' } },
+    resources: [
+      { resource: { kind: 'document', id: '1', attr: { owner: 'user@example.com' } }, actions: ['view', 'edit'] },
+      { resource: { kind: 'document', id: '2', attr: { owner: 'someone-else@example.com' } }, actions: ['view', 'edit'] },
+    ],
+    includeMetadata: true,
+  },
+  null,
+  2,
+);
+
+function parseJson<T>(input: string, label: string): T {
+  try {
+    return JSON.parse(input) as T;
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    throw new Error(`${label} is not valid JSON: ${message}`);
+  }
+}
+
+function stringify(value: unknown) {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
 export default function CheckResourcesScreen() {
-  const {
-    checkResourcesJson,
-    setCheckResourcesJson,
-    isCheckingResources,
-    checkResourcesResult,
-    checkResources,
-  } = useCerbosEpdp();
+  const { checkResources } = useCerbosEpdp();
+
+  const [checkResourcesJson, setCheckResourcesJson] = useState(defaultCheckResourcesJson);
+  const [isCheckingResources, setIsCheckingResources] = useState(false);
+  const [checkResourcesResult, setCheckResourcesResult] = useState('');
+
+  const onRun = async () => {
+    setIsCheckingResources(true);
+    setCheckResourcesResult('');
+    try {
+      const request = parseJson<CheckResourcesRequest>(checkResourcesJson, 'checkResources JSON');
+      const result = await checkResources(request);
+      setCheckResourcesResult(stringify(result));
+    } catch (e) {
+      setCheckResourcesResult(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setIsCheckingResources(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -34,7 +77,7 @@ export default function CheckResourcesScreen() {
             textAlignVertical="top"
           />
 
-          <Pressable style={[styles.button, isCheckingResources && styles.buttonDisabled]} disabled={isCheckingResources} onPress={checkResources}>
+          <Pressable style={[styles.button, isCheckingResources && styles.buttonDisabled]} disabled={isCheckingResources} onPress={onRun}>
             <ThemedText type="defaultSemiBold">{isCheckingResources ? 'Calling…' : 'Run checkResources'}</ThemedText>
           </Pressable>
         </ThemedView>
@@ -80,4 +123,3 @@ const styles = StyleSheet.create({
   },
   resultText: { fontSize: 12, lineHeight: 18 },
 });
-

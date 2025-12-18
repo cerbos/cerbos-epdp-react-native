@@ -62,21 +62,20 @@ export type CerbosInitOptions = {
   wasmBase64?: string;
 };
 
-export type EmbeddedClientOptionsPayload = {
-  headers?: EmbeddedClientOptions['headers'];
-  userAgent?: EmbeddedClientOptions['userAgent'];
-  defaultPolicyVersion?: EmbeddedClientOptions['defaultPolicyVersion'];
-  globals?: EmbeddedClientOptions['globals'];
-  lenientScopeSearch?: EmbeddedClientOptions['lenientScopeSearch'];
-  schemaEnforcement?: EmbeddedClientOptions['schemaEnforcement'];
-  onValidationError?: 'throw' | 'callback' | 'return';
-};
+type EmbeddedClientOptionsInput = Partial<
+  Pick<
+    EmbeddedClientOptions,
+    | 'headers'
+    | 'userAgent'
+    | 'defaultPolicyVersion'
+    | 'globals'
+    | 'lenientScopeSearch'
+    | 'schemaEnforcement'
+    | 'onValidationError'
+  >
+>;
 
-export type PolicyOptionsPayload = {
-  scopes?: PolicyLoaderOptions['scopes'];
-  activateOnLoad?: PolicyLoaderOptions['activateOnLoad'];
-  interval?: PolicyLoaderOptions['interval'];
-};
+type PolicyOptionsInput = Partial<Pick<PolicyLoaderOptions, 'scopes' | 'activateOnLoad' | 'interval'>>;
 
 export type CerbosCallbacks = {
   onDecision?: (entry: DecisionLogEntry) => void | Promise<void>;
@@ -93,8 +92,8 @@ type CallbackIdsPayload = {
 };
 
 type CerbosInitParamsPayload = CerbosInitOptions & {
-  options?: EmbeddedClientOptionsPayload;
-  policyOptions?: PolicyOptionsPayload;
+  options?: EmbeddedClientOptionsInput;
+  policyOptions?: PolicyOptionsInput;
   callbackIds?: CallbackIdsPayload;
 };
 
@@ -109,8 +108,8 @@ export type CerbosWebViewHandle = {
   isReady: () => boolean;
   init: (
     params: CerbosInitOptions & {
-      options?: EmbeddedClientOptionsPayload;
-      policyOptions?: PolicyOptionsPayload;
+      options?: EmbeddedClientOptionsInput;
+      policyOptions?: PolicyOptionsInput;
       callbacks?: CerbosCallbacks;
     },
   ) => Promise<void>;
@@ -325,7 +324,7 @@ function getBridgeHtml({ embeddedClientBundle }: { embeddedClientBundle?: string
         const onValidationError =
           options.onValidationError === "throw"
             ? "throw"
-            : options.onValidationError === "callback" && callbackIds.onValidationError
+            : callbackIds.onValidationError
               ? (errors) => { postCallbackRequest(callbackIds.onValidationError, errors, false); }
               : undefined;
 
