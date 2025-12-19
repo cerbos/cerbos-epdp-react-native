@@ -7,116 +7,26 @@ import React, {
   useState,
 } from 'react';
 import { Platform, type StyleProp, type ViewStyle } from 'react-native';
-import { WebView, type WebViewMessageEvent } from 'react-native-webview';
+import { WebView, type WebViewMessageEvent, type WebViewProps } from 'react-native-webview';
 import { Asset } from 'expo-asset';
 import * as FileSystem from 'expo-file-system/legacy';
 
-import embeddedClientBundleAsset from '../assets/cerbos/embedded-client.bundle.txt';
+import bridgeHtmlAsset from '../assets/cerbos/bridge.html';
+import bridgeBundleAsset from '../assets/cerbos/bridge.bundle';
 import embeddedServerWasmAsset from '@cerbos/embedded-server/lib/server.wasm';
+import type { CheckResourceRequest, CheckResourcesRequest, PlanResourcesRequest } from '@cerbos/core';
+
 import type {
-  Options as EmbeddedClientOptions,
-  PolicyLoaderOptions,
-  DecodeJWTPayload,
-  DecodedJWTPayload,
-} from '@cerbos/embedded-client';
-import type {
-  CheckResourceRequest,
-  CheckResourcesRequest,
-  PlanResourcesRequest,
-  DecisionLogEntry,
-  ValidationError,
-  NotOK,
-} from '@cerbos/core';
-
-type SerializedError = { name: string; message: string; stack?: string };
-
-type RpcRequest =
-  | { type: 'rpc'; id: string; method: 'init'; params: CerbosInitParamsPayload }
-  | { type: 'rpc'; id: string; method: 'wasmUpload'; params: WasmUploadParams }
-  | { type: 'rpc'; id: string; method: 'checkResource'; params: CheckResourceRequest }
-  | { type: 'rpc'; id: string; method: 'checkResources'; params: CheckResourcesRequest }
-  | { type: 'rpc'; id: string; method: 'planResources'; params: PlanResourcesRequest };
-
-type RpcResponse =
-  | { type: 'ready' }
-  | { type: 'rpcResponse'; id: string; ok: true; result: unknown }
-  | { type: 'rpcResponse'; id: string; ok: false; error: SerializedError };
-
-type CallbackRequest = {
-  type: 'callback';
-  id: string;
-  callbackId: string;
-  payload: unknown;
-  expectsResponse?: boolean;
-};
-
-type CallbackResponse =
-  | { type: 'callbackResponse'; id: string; ok: true; result: unknown }
-  | { type: 'callbackResponse'; id: string; ok: false; error: SerializedError };
-
-export type CerbosInitOptions = {
-  ruleId: string;
-  hubClientId?: string;
-  hubClientSecret?: string;
-  hubBaseUrl?: string;
-  wasmBase64?: string;
-};
-
-type EmbeddedClientOptionsInput = Partial<
-  Pick<
-    EmbeddedClientOptions,
-    | 'headers'
-    | 'userAgent'
-    | 'defaultPolicyVersion'
-    | 'globals'
-    | 'lenientScopeSearch'
-    | 'schemaEnforcement'
-    | 'onValidationError'
-  >
->;
-
-type PolicyOptionsInput = Partial<Pick<PolicyLoaderOptions, 'scopes' | 'activateOnLoad' | 'interval'>>;
-
-export type CerbosCallbacks = {
-  onDecision?: (entry: DecisionLogEntry) => void | Promise<void>;
-  onValidationError?: (validationErrors: ValidationError[]) => void | Promise<void>;
-  decodeJWTPayload?: (jwt: Parameters<DecodeJWTPayload>[0]) => Promise<DecodedJWTPayload> | DecodedJWTPayload;
-  onPolicyUpdate?: (error: NotOK | undefined) => void | Promise<void>;
-};
-
-type CallbackIdsPayload = {
-  onDecision?: string;
-  onValidationError?: string;
-  decodeJWTPayload?: string;
-  onPolicyUpdate?: string;
-};
-
-type CerbosInitParamsPayload = CerbosInitOptions & {
-  options?: EmbeddedClientOptionsInput;
-  policyOptions?: PolicyOptionsInput;
-  callbackIds?: CallbackIdsPayload;
-};
-
-type WasmUploadParams = {
-  uploadId: string;
-  index: number;
-  total: number;
-  chunk: string;
-};
-
-export type CerbosWebViewHandle = {
-  isReady: () => boolean;
-  init: (
-    params: CerbosInitOptions & {
-      options?: EmbeddedClientOptionsInput;
-      policyOptions?: PolicyOptionsInput;
-      callbacks?: CerbosCallbacks;
-    },
-  ) => Promise<void>;
-  checkResource: (request: CheckResourceRequest) => Promise<unknown>;
-  checkResources: (request: CheckResourcesRequest) => Promise<unknown>;
-  planResources: (request: PlanResourcesRequest) => Promise<unknown>;
-};
+  CallbackIdsPayload,
+  CallbackRequest,
+  CallbackResponse,
+  CerbosCallbacks,
+  CerbosInitParamsPayload,
+  CerbosWebViewHandle,
+  RpcRequest,
+  RpcResponse,
+} from './cerbos-embedded-bridge-types';
+export type { CerbosCallbacks, CerbosInitOptions, CerbosWebViewHandle } from './cerbos-embedded-bridge-types';
 
 function createRequestId() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -127,6 +37,41 @@ async function readAssetString(moduleId: number, encoding?: FileSystem.EncodingT
   await asset.downloadAsync();
   const uri = asset.localUri ?? asset.uri;
   return await FileSystem.readAsStringAsync(uri, encoding ? { encoding } : undefined);
+}
+
+async function stageBridgeAssets() {
+  const htmlAsset = Asset.fromModule(bridgeHtmlAsset);
+  const bundleAsset = Asset.fromModule(bridgeBundleAsset);
+  await Promise.all([htmlAsset.downloadAsync(), bundleAsset.downloadAsync()]);
+
+  const htmlUri = htmlAsset.localUri ?? htmlAsset.uri;
+  const bundleUri = bundleAsset.localUri ?? bundleAsset.uri;
+
+  const baseDir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory;
+  if (!baseDir) {
+    throw new Error('Missing cache directory for WebView assets');
+  }
+
+  const hasStableHash = Boolean(htmlAsset.hash && bundleAsset.hash);
+  const hashSuffix = [htmlAsset.hash, bundleAsset.hash].filter(Boolean).join('-') || 'current';
+  const targetDir = `${baseDir}cerbos-webview/${hashSuffix}/`;
+  await FileSystem.makeDirectoryAsync(targetDir, { intermediates: true });
+
+  const htmlTarget = `${targetDir}bridge.html`;
+  const bundleTarget = `${targetDir}bridge.bundle`;
+  const [htmlInfo, bundleInfo] = await Promise.all([
+    FileSystem.getInfoAsync(htmlTarget),
+    FileSystem.getInfoAsync(bundleTarget),
+  ]);
+
+  if (!htmlInfo.exists || !hasStableHash) {
+    await FileSystem.copyAsync({ from: htmlUri, to: htmlTarget });
+  }
+  if (!bundleInfo.exists || !hasStableHash) {
+    await FileSystem.copyAsync({ from: bundleUri, to: bundleTarget });
+  }
+
+  return { htmlUri: htmlTarget, readAccessUri: targetDir };
 }
 
 function getLoadingHtml() {
@@ -201,273 +146,6 @@ function getErrorHtml(errorMessage: string) {
 </html>`;
 }
 
-function getBridgeHtml({ embeddedClientBundle }: { embeddedClientBundle?: string | null }) {
-  return `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Cerbos Embedded Runtime</title>
-    <style>
-      html, body { margin: 0; padding: 0; font-family: -apple-system, system-ui, sans-serif; }
-      body { padding: 10px; }
-      .muted { color: #666; font-size: 12px; }
-    </style>
-  </head>
-  <body>
-    <div>Cerbos Embedded Runtime</div>
-    <div class="muted" id="status">Loading…</div>
-    ${embeddedClientBundle ? `<script>(0,eval)(${JSON.stringify(embeddedClientBundle)});</script>` : ''}
-    <script>
-      const statusEl = document.getElementById("status");
-
-      function setStatus(text) {
-        if (statusEl) statusEl.textContent = text;
-      }
-
-      function post(msg) {
-        try {
-          window.ReactNativeWebView?.postMessage(JSON.stringify(msg));
-        } catch (e) {
-          // ignore
-        }
-      }
-
-      function serializeError(err) {
-        const e = err ?? {};
-        return {
-          name: String(e.name ?? "Error"),
-          message: String(e.message ?? e),
-          stack: typeof e.stack === "string" ? e.stack : undefined,
-        };
-      }
-
-      function decodeBase64ToUint8Array(base64) {
-        const raw = atob(base64);
-        const bytes = new Uint8Array(raw.length);
-        for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
-        return bytes;
-      }
-
-      let bundledWasmBase64 = null;
-      const wasmUploads = new Map();
-
-      let Embedded = null;
-      let cerbos = null;
-
-      const CALLBACK_TIMEOUT_MS = 30000;
-      const callbackWaiters = new Map();
-
-      function postCallbackRequest(callbackId, payload, expectsResponse) {
-        const id = String(Date.now()) + "-" + Math.random().toString(16).slice(2);
-        post({ type: "callback", id, callbackId, payload, expectsResponse });
-        return id;
-      }
-
-      function callNativeCallback(callbackId, payload) {
-        const id = postCallbackRequest(callbackId, payload, true);
-        return new Promise((resolve, reject) => {
-          const timeout = setTimeout(() => {
-            const waiter = callbackWaiters.get(id);
-            if (!waiter) return;
-            callbackWaiters.delete(id);
-            reject(new Error("Native callback timed out"));
-          }, CALLBACK_TIMEOUT_MS);
-          callbackWaiters.set(id, { resolve, reject, timeout });
-        });
-      }
-
-      async function loadSdk() {
-        if (Embedded) return;
-        setStatus("Loading SDK…");
-        if (!globalThis.__cerbosEmbedded?.Embedded) {
-          throw new Error("Missing bundled @cerbos/embedded-client. Ensure assets/cerbos/embedded-client.bundle.txt exists and is up to date.");
-        }
-        Embedded = globalThis.__cerbosEmbedded.Embedded;
-        setStatus("SDK loaded.");
-      }
-
-      async function initClient(params) {
-        await loadSdk();
-
-        const wasmBase64 = params.wasmBase64 || bundledWasmBase64;
-        const wasm = wasmBase64
-          ? decodeBase64ToUint8Array(wasmBase64)
-          : (() => { throw new Error("Missing WASM. Ensure the app uploads the bundled @cerbos/embedded-server WASM before calling init."); })();
-
-        const { ruleId, hubClientId, hubClientSecret, hubBaseUrl } = params;
-        const policyOptions = params.policyOptions || {};
-        const callbackIds = params.callbackIds || {};
-
-        const basePolicies = hubClientId && hubClientSecret
-          ? { ruleId, credentials: { clientId: hubClientId, clientSecret: hubClientSecret }, ...(hubBaseUrl ? { baseUrl: hubBaseUrl } : {}) }
-          : { ruleId, ...(hubBaseUrl ? { baseUrl: hubBaseUrl } : {}) };
-
-        const policies = {
-          ...basePolicies,
-          ...(Array.isArray(policyOptions.scopes) ? { scopes: policyOptions.scopes } : {}),
-          ...(typeof policyOptions.activateOnLoad === "boolean" ? { activateOnLoad: policyOptions.activateOnLoad } : {}),
-          ...(typeof policyOptions.interval === "number" ? { interval: policyOptions.interval } : {}),
-          ...(callbackIds.onPolicyUpdate
-            ? { onUpdate: (error) => { postCallbackRequest(callbackIds.onPolicyUpdate, error, false); } }
-            : {}),
-        };
-
-        const options = params.options || {};
-
-        const decodeJWTPayload = callbackIds.decodeJWTPayload
-          ? async (jwt) => await callNativeCallback(callbackIds.decodeJWTPayload, jwt)
-          : undefined;
-
-        const onDecision = callbackIds.onDecision
-          ? async (entry) => { postCallbackRequest(callbackIds.onDecision, entry, false); }
-          : undefined;
-
-        const onValidationError =
-          options.onValidationError === "throw"
-            ? "throw"
-            : callbackIds.onValidationError
-              ? (errors) => { postCallbackRequest(callbackIds.onValidationError, errors, false); }
-              : undefined;
-
-        setStatus("Initializing embedded client…");
-        cerbos = new Embedded({
-          policies,
-          wasm,
-          ...(options.headers ? { headers: options.headers } : {}),
-          ...(options.userAgent ? { userAgent: options.userAgent } : {}),
-          ...(options.defaultPolicyVersion ? { defaultPolicyVersion: options.defaultPolicyVersion } : {}),
-          ...(options.globals ? { globals: options.globals } : {}),
-          ...(typeof options.lenientScopeSearch === "boolean" ? { lenientScopeSearch: options.lenientScopeSearch } : {}),
-          ...(options.schemaEnforcement ? { schemaEnforcement: options.schemaEnforcement } : {}),
-          ...(decodeJWTPayload ? { decodeJWTPayload } : {}),
-          ...(onDecision ? { onDecision } : {}),
-          ...(onValidationError ? { onValidationError } : {}),
-        });
-        setStatus("Client initialized.");
-      }
-
-      async function checkResource(request) {
-        if (!cerbos) throw new Error("Cerbos client not initialized. Call init first.");
-        const result = await cerbos.checkResource(request);
-        return {
-          resource: result.resource,
-          actions: result.actions,
-          allAllowed: result.allAllowed(),
-          allowedActions: result.allowedActions(),
-          validationErrors: result.validationErrors,
-          metadata: result.metadata,
-          outputs: result.outputs,
-        };
-      }
-
-      async function checkResources(request) {
-        if (!cerbos) throw new Error("Cerbos client not initialized. Call init first.");
-        const response = await cerbos.checkResources(request);
-        return {
-          cerbosCallId: response.cerbosCallId,
-          requestId: response.requestId,
-          results: response.results.map((result) => ({
-            resource: result.resource,
-            actions: result.actions,
-            allAllowed: result.allAllowed(),
-            allowedActions: result.allowedActions(),
-            validationErrors: result.validationErrors,
-            metadata: result.metadata,
-            outputs: result.outputs,
-          })),
-          validationErrors: response.validationErrors,
-        };
-      }
-
-      async function planResources(request) {
-        if (!cerbos) throw new Error("Cerbos client not initialized. Call init first.");
-        const response = await cerbos.planResources(request);
-        return response;
-      }
-
-      async function wasmUpload(params) {
-        const { uploadId, index, total, chunk } = params || {};
-        if (
-          !uploadId ||
-          !Number.isInteger(index) ||
-          !Number.isInteger(total) ||
-          total <= 0 ||
-          typeof chunk !== "string"
-        ) {
-          throw new Error("Invalid wasmUpload params");
-        }
-        if (index < 0 || index >= total) {
-          throw new Error("Invalid upload index");
-        }
-
-        let upload = wasmUploads.get(uploadId);
-        if (!upload) {
-          upload = { total, chunks: new Array(total), received: 0 };
-          wasmUploads.set(uploadId, upload);
-        }
-
-        if (upload.total !== total) {
-          throw new Error("Mismatched upload total");
-        }
-
-        if (upload.chunks[index] === undefined) {
-          upload.received++;
-        }
-        upload.chunks[index] = chunk;
-
-        if (upload.received >= upload.total) {
-          bundledWasmBase64 = upload.chunks.join("");
-          wasmUploads.delete(uploadId);
-          return { done: true };
-        }
-
-        return { done: false, received: upload.received, total: upload.total };
-      }
-
-      const handlers = { init: initClient, checkResource, checkResources, planResources, wasmUpload };
-
-      async function handleRpc(msg) {
-        const { id, method, params } = msg;
-        try {
-          if (!handlers[method]) throw new Error(\`Unknown method: \${method}\`);
-          const result = await handlers[method](params);
-          post({ type: "rpcResponse", id, ok: true, result });
-        } catch (err) {
-          post({ type: "rpcResponse", id, ok: false, error: serializeError(err) });
-        }
-      }
-
-      function receive(event) {
-        const data = event?.data;
-        if (typeof data !== "string") return;
-        let msg;
-        try { msg = JSON.parse(data); } catch { return; }
-        if (!msg || (msg.type !== "rpc" && msg.type !== "callbackResponse")) return;
-        if (msg.type === "rpc") {
-          handleRpc(msg);
-          return;
-        }
-
-        const waiter = callbackWaiters.get(msg.id);
-        if (!waiter) return;
-        callbackWaiters.delete(msg.id);
-        clearTimeout(waiter.timeout);
-        if (msg.ok) waiter.resolve(msg.result);
-        else waiter.reject(new Error(msg.error?.message || "Native callback failed"));
-      }
-
-      // Android uses document, iOS uses window.
-      document.addEventListener("message", receive);
-      window.addEventListener("message", receive);
-
-      setStatus("Bridge ready.");
-      post({ type: "ready" });
-    </script>
-  </body>
-</html>`;
-}
-
 type Pending = {
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
@@ -493,7 +171,8 @@ export const CerbosEmbeddedWebView = forwardRef<
   const readyWaitersRef = useRef<ReadyWaiter[]>([]);
   const [isReady, setIsReady] = useState(false);
 
-  const [html, setHtml] = useState(() => getLoadingHtml());
+  const [source, setSource] = useState<NonNullable<WebViewProps['source']>>(() => ({ html: getLoadingHtml() }));
+  const [bridgeReadAccessUri, setBridgeReadAccessUri] = useState<string | null>(null);
   const wasmBase64Ref = useRef<string | null>(null);
   const wasmBase64PromiseRef = useRef<Promise<string | null> | null>(null);
   const wasmUploadedRef = useRef(false);
@@ -536,18 +215,27 @@ export const CerbosEmbeddedWebView = forwardRef<
     let cancelled = false;
 
     void (async () => {
-      if (Platform.OS === 'web') return;
+      if (Platform.OS === 'web') {
+        if (!cancelled) {
+          handleWebViewReload('WebView not available on web');
+          setBridgeReadAccessUri(null);
+          setSource({ html: getErrorHtml('This demo does not support web (local WebView assets are required).') });
+        }
+        return;
+      }
       try {
-        const embeddedClientBundle = await readAssetString(embeddedClientBundleAsset);
+        const { htmlUri, readAccessUri } = await stageBridgeAssets();
         if (!cancelled) {
           handleWebViewReload('WebView reloaded');
-          setHtml(getBridgeHtml({ embeddedClientBundle }));
+          setBridgeReadAccessUri(readAccessUri);
+          setSource({ uri: htmlUri });
         }
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
         if (!cancelled) {
           handleWebViewReload('WebView failed to load');
-          setHtml(getErrorHtml(message));
+          setBridgeReadAccessUri(null);
+          setSource({ html: getErrorHtml(message) });
         }
       }
     })();
@@ -824,9 +512,13 @@ export const CerbosEmbeddedWebView = forwardRef<
       containerStyle={containerStyle}
       originWhitelist={['*']}
       javaScriptEnabled
+      allowFileAccess
+      allowFileAccessFromFileURLs
+      allowUniversalAccessFromFileURLs
+      allowingReadAccessToURL={bridgeReadAccessUri ?? undefined}
       domStorageEnabled
       setSupportMultipleWindows={false}
-      source={{ html }}
+      source={source}
       onLoadStart={onLoadStart}
       onMessage={onMessage}
     />
