@@ -8,6 +8,7 @@ import type {
 } from '@cerbos/core';
 import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
+import { toByteArray } from 'react-native-quick-base64';
 
 import type { Options as EmbeddedClientOptions, PolicyLoaderOptions } from '@cerbos/embedded-client';
 
@@ -207,11 +208,11 @@ function base64UrlDecodeToString(base64Url: string) {
   const pad = base64.length % 4;
   const padded = pad ? base64 + '='.repeat(4 - pad) : base64;
 
-  if (typeof globalThis.atob === 'function') {
+  if (Platform.OS === 'web' && typeof globalThis.atob === 'function') {
     return globalThis.atob(padded);
   }
 
-  const bytes = base64ToBytes(padded);
+  const bytes = toByteArray(padded);
   if (typeof globalThis.TextDecoder === 'function') {
     return new TextDecoder().decode(bytes);
   }
@@ -221,34 +222,4 @@ function base64UrlDecodeToString(base64Url: string) {
     s += String.fromCharCode(bytes[i]);
   }
   return s;
-}
-
-function base64ToBytes(base64: string) {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-  const lookup = new Uint8Array(256);
-  lookup.fill(255);
-  for (let i = 0; i < chars.length; i++) lookup[chars.charCodeAt(i)] = i;
-
-  const clean = base64.replace(/=+$/, '');
-  const len = clean.length;
-  const outLen = Math.floor((len * 3) / 4);
-  const out = new Uint8Array(outLen);
-
-  let buffer = 0;
-  let bits = 0;
-  let outIndex = 0;
-
-  for (let i = 0; i < len; i++) {
-    const code = clean.charCodeAt(i);
-    const val = lookup[code];
-    if (val === 255) continue;
-    buffer = (buffer << 6) | val;
-    bits += 6;
-    if (bits >= 8) {
-      bits -= 8;
-      out[outIndex++] = (buffer >> bits) & 0xff;
-    }
-  }
-
-  return outIndex === out.length ? out : out.slice(0, outIndex);
 }

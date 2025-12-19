@@ -255,6 +255,7 @@ function getBridgeHtml({ embeddedClientBundle }: { embeddedClientBundle?: string
       let Embedded = null;
       let cerbos = null;
 
+      const CALLBACK_TIMEOUT_MS = 30000;
       const callbackWaiters = new Map();
 
       function postCallbackRequest(callbackId, payload, expectsResponse) {
@@ -266,12 +267,13 @@ function getBridgeHtml({ embeddedClientBundle }: { embeddedClientBundle?: string
       function callNativeCallback(callbackId, payload) {
         const id = postCallbackRequest(callbackId, payload, true);
         return new Promise((resolve, reject) => {
-          callbackWaiters.set(id, { resolve, reject });
-          setTimeout(() => {
-            if (!callbackWaiters.has(id)) return;
+          const timeout = setTimeout(() => {
+            const waiter = callbackWaiters.get(id);
+            if (!waiter) return;
             callbackWaiters.delete(id);
             reject(new Error("Native callback timed out"));
-          }, 30000);
+          }, CALLBACK_TIMEOUT_MS);
+          callbackWaiters.set(id, { resolve, reject, timeout });
         });
       }
 
@@ -386,13 +388,22 @@ function getBridgeHtml({ embeddedClientBundle }: { embeddedClientBundle?: string
 
       async function wasmUpload(params) {
         const { uploadId, index, total, chunk } = params || {};
-        if (!uploadId || typeof index !== "number" || typeof total !== "number" || typeof chunk !== "string") {
+        if (
+          !uploadId ||
+          !Number.isInteger(index) ||
+          !Number.isInteger(total) ||
+          total <= 0 ||
+          typeof chunk !== "string"
+        ) {
           throw new Error("Invalid wasmUpload params");
+        }
+        if (index < 0 || index >= total) {
+          throw new Error("Invalid upload index");
         }
 
         let upload = wasmUploads.get(uploadId);
         if (!upload) {
-          upload = { total, chunks: new Array(total).fill(""), received: 0 };
+          upload = { total, chunks: new Array(total), received: 0 };
           wasmUploads.set(uploadId, upload);
         }
 
@@ -400,7 +411,7 @@ function getBridgeHtml({ embeddedClientBundle }: { embeddedClientBundle?: string
           throw new Error("Mismatched upload total");
         }
 
-        if (!upload.chunks[index]) {
+        if (upload.chunks[index] === undefined) {
           upload.received++;
         }
         upload.chunks[index] = chunk;
@@ -441,6 +452,7 @@ function getBridgeHtml({ embeddedClientBundle }: { embeddedClientBundle?: string
         const waiter = callbackWaiters.get(msg.id);
         if (!waiter) return;
         callbackWaiters.delete(msg.id);
+        clearTimeout(waiter.timeout);
         if (msg.ok) waiter.resolve(msg.result);
         else waiter.reject(new Error(msg.error?.message || "Native callback failed"));
       }
@@ -462,6 +474,15 @@ type Pending = {
   timeout: ReturnType<typeof setTimeout>;
 };
 
+type ReadyWaiter = {
+  resolve: () => void;
+  reject: (error: Error) => void;
+};
+
+const RPC_TIMEOUT_MS = 30_000;
+const WASM_UPLOAD_TIMEOUT_MS = 120_000;
+const WASM_UPLOAD_CHUNK_SIZE = 256 * 1024;
+
 export const CerbosEmbeddedWebView = forwardRef<
   CerbosWebViewHandle,
   { style?: StyleProp<ViewStyle>; containerStyle?: StyleProp<ViewStyle> }
@@ -469,7 +490,7 @@ export const CerbosEmbeddedWebView = forwardRef<
   const webViewRef = useRef<WebView>(null);
   const pendingRef = useRef(new Map<string, Pending>());
   const callbacksRef = useRef(new Map<string, CerbosCallbacks[keyof CerbosCallbacks]>());
-  const readyResolversRef = useRef<(() => void)[]>([]);
+  const readyWaitersRef = useRef<ReadyWaiter[]>([]);
   const [isReady, setIsReady] = useState(false);
 
   const [html, setHtml] = useState(() => getLoadingHtml());
@@ -477,6 +498,39 @@ export const CerbosEmbeddedWebView = forwardRef<
   const wasmBase64PromiseRef = useRef<Promise<string | null> | null>(null);
   const wasmUploadedRef = useRef(false);
   const wasmUploadPromiseRef = useRef<Promise<void> | null>(null);
+
+  const resetPendingRequests = useCallback((reason: string) => {
+    const error = new Error(reason);
+    for (const pending of pendingRef.current.values()) {
+      clearTimeout(pending.timeout);
+      pending.reject(error);
+    }
+    pendingRef.current.clear();
+  }, []);
+
+  const rejectReadyWaiters = useCallback((reason: string) => {
+    const error = new Error(reason);
+    for (const waiter of readyWaitersRef.current) waiter.reject(error);
+    readyWaitersRef.current = [];
+  }, []);
+
+  const resetReadyState = useCallback(
+    (reason: string) => {
+      setIsReady(false);
+      rejectReadyWaiters(reason);
+      resetPendingRequests(reason);
+    },
+    [rejectReadyWaiters, resetPendingRequests],
+  );
+
+  const handleWebViewReload = useCallback(
+    (reason = 'WebView reloaded') => {
+      resetReadyState(reason);
+      wasmUploadedRef.current = false;
+      wasmUploadPromiseRef.current = null;
+    },
+    [resetReadyState],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -486,44 +540,45 @@ export const CerbosEmbeddedWebView = forwardRef<
       try {
         const embeddedClientBundle = await readAssetString(embeddedClientBundleAsset);
         if (!cancelled) {
-          setIsReady(false);
-          readyResolversRef.current = [];
-
-          for (const pending of pendingRef.current.values()) {
-            clearTimeout(pending.timeout);
-            pending.reject(new Error('WebView reloaded'));
-          }
-          pendingRef.current.clear();
-
+          handleWebViewReload('WebView reloaded');
           setHtml(getBridgeHtml({ embeddedClientBundle }));
         }
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
-        if (!cancelled) setHtml(getErrorHtml(message));
+        if (!cancelled) {
+          handleWebViewReload('WebView failed to load');
+          setHtml(getErrorHtml(message));
+        }
       }
     })();
 
     return () => {
       cancelled = true;
+      resetPendingRequests('WebView unmounted');
+      rejectReadyWaiters('WebView unmounted');
     };
-  }, []);
+  }, [handleWebViewReload, rejectReadyWaiters, resetPendingRequests]);
 
   const resolveReady = useCallback(() => {
     setIsReady(true);
-    for (const resolve of readyResolversRef.current) resolve();
-    readyResolversRef.current = [];
+    for (const waiter of readyWaitersRef.current) waiter.resolve();
+    readyWaitersRef.current = [];
   }, []);
 
   const awaitReady = useCallback(() => {
     if (isReady) return Promise.resolve();
-    return new Promise<void>((resolve) => {
-      readyResolversRef.current.push(resolve);
+    return new Promise<void>((resolve, reject) => {
+      readyWaitersRef.current.push({ resolve, reject });
     });
   }, [isReady]);
 
   const postRpc = useCallback(
-    async (message: RpcRequest, timeoutMs = 30_000) => {
+    async (message: RpcRequest, timeoutMs = RPC_TIMEOUT_MS) => {
       await awaitReady();
+      const webView = webViewRef.current;
+      if (!webView) {
+        throw new Error('WebView not ready yet');
+      }
 
       return await new Promise<unknown>((resolve, reject) => {
         const id = message.id;
@@ -534,7 +589,7 @@ export const CerbosEmbeddedWebView = forwardRef<
         }, timeoutMs);
 
         pendingRef.current.set(id, { resolve, reject, timeout });
-        webViewRef.current?.postMessage(JSON.stringify(message));
+        webView.postMessage(JSON.stringify(message));
       });
     },
     [awaitReady],
@@ -544,17 +599,24 @@ export const CerbosEmbeddedWebView = forwardRef<
     if (Platform.OS === 'web') return null;
 
     if (wasmBase64Ref.current) return wasmBase64Ref.current;
-    wasmBase64PromiseRef.current ??= (async () => {
-      try {
-        const wasmBase64 = await readAssetString(embeddedServerWasmAsset, FileSystem.EncodingType.Base64);
-        wasmBase64Ref.current = wasmBase64;
-        return wasmBase64;
-      } catch {
-        return null;
-      }
-    })();
+    const promise =
+      wasmBase64PromiseRef.current ??
+      (async () => {
+        try {
+          const wasmBase64 = await readAssetString(embeddedServerWasmAsset, FileSystem.EncodingType.Base64);
+          wasmBase64Ref.current = wasmBase64;
+          return wasmBase64;
+        } catch {
+          return null;
+        }
+      })();
 
-    return await wasmBase64PromiseRef.current;
+    wasmBase64PromiseRef.current = promise;
+    const wasmBase64 = await promise;
+    if (!wasmBase64) {
+      wasmBase64PromiseRef.current = null;
+    }
+    return wasmBase64;
   }, []);
 
   const ensureBundledWasmUploaded = useCallback(async () => {
@@ -562,30 +624,35 @@ export const CerbosEmbeddedWebView = forwardRef<
     if (wasmUploadedRef.current) return;
 
     wasmUploadPromiseRef.current ??= (async () => {
-      const wasmBase64 = await getBundledWasmBase64();
-      if (!wasmBase64) return;
+      try {
+        const wasmBase64 = await getBundledWasmBase64();
+        if (!wasmBase64) return;
 
-      const chunkSize = 256 * 1024;
-      const total = Math.ceil(wasmBase64.length / chunkSize);
-      const uploadId = createRequestId();
+        const total = Math.ceil(wasmBase64.length / WASM_UPLOAD_CHUNK_SIZE);
+        const uploadId = createRequestId();
 
-      for (let index = 0; index < total; index++) {
-        const chunk = wasmBase64.slice(
-          index * chunkSize,
-          Math.min((index + 1) * chunkSize, wasmBase64.length),
-        );
-        const message: RpcRequest = {
-          type: 'rpc',
-          id: createRequestId(),
-          method: 'wasmUpload',
-          params: { uploadId, index, total, chunk },
-        };
-        await postRpc(message, 120_000);
+        for (let index = 0; index < total; index++) {
+          const chunk = wasmBase64.slice(
+            index * WASM_UPLOAD_CHUNK_SIZE,
+            Math.min((index + 1) * WASM_UPLOAD_CHUNK_SIZE, wasmBase64.length),
+          );
+          const message: RpcRequest = {
+            type: 'rpc',
+            id: createRequestId(),
+            method: 'wasmUpload',
+            params: { uploadId, index, total, chunk },
+          };
+          await postRpc(message, WASM_UPLOAD_TIMEOUT_MS);
+        }
+
+        wasmUploadedRef.current = true;
+        wasmBase64Ref.current = null;
+        wasmBase64PromiseRef.current = null;
+      } finally {
+        if (!wasmUploadedRef.current) {
+          wasmUploadPromiseRef.current = null;
+        }
       }
-
-      wasmUploadedRef.current = true;
-      wasmBase64Ref.current = null;
-      wasmBase64PromiseRef.current = null;
     })();
 
     await wasmUploadPromiseRef.current;
@@ -620,14 +687,13 @@ export const CerbosEmbeddedWebView = forwardRef<
           return;
         }
 
-        void Promise.resolve()
-          .then(async () => {
+        void (async () => {
+          try {
             const result = await (handler as (payload: unknown) => unknown)(msg.payload);
             if (!msg.expectsResponse) return;
             const response: CallbackResponse = { type: 'callbackResponse', id: msg.id, ok: true, result };
             webViewRef.current?.postMessage(JSON.stringify(response));
-          })
-          .catch((e) => {
+          } catch (e) {
             if (!msg.expectsResponse) return;
             const message = e instanceof Error ? e.message : String(e);
             const response: CallbackResponse = {
@@ -637,7 +703,8 @@ export const CerbosEmbeddedWebView = forwardRef<
               error: { name: e instanceof Error ? e.name : 'Error', message },
             };
             webViewRef.current?.postMessage(JSON.stringify(response));
-          });
+          }
+        })();
 
         return;
       }
@@ -663,11 +730,17 @@ export const CerbosEmbeddedWebView = forwardRef<
     [resolveReady],
   );
 
+  const onLoadStart = useCallback(() => {
+    if (!isReady) return;
+    handleWebViewReload('WebView reloaded');
+  }, [handleWebViewReload, isReady]);
+
   useImperativeHandle(
     ref,
     () => ({
       isReady: () => isReady,
       init: async (params) => {
+        callbacksRef.current.clear();
         const callbackIds: CallbackIdsPayload = {};
         if (params.callbacks?.onDecision) {
           const id = createRequestId();
@@ -754,6 +827,7 @@ export const CerbosEmbeddedWebView = forwardRef<
       domStorageEnabled
       setSupportMultipleWindows={false}
       source={{ html }}
+      onLoadStart={onLoadStart}
       onMessage={onMessage}
     />
   );
