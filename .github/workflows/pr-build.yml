@@ -1,0 +1,103 @@
+name: Build
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: "true"
+  EXPO_NO_TELEMETRY: "1"
+
+jobs:
+  js-bundle:
+    name: JS bundle (Expo export)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
+
+      - name: Setup Node
+        uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f # v6.1.0
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Export bundles (iOS + Android)
+        run: npx expo export --non-interactive --platform ios --platform android
+
+  # android:
+  #   name: Android debug build
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+
+  #     - name: Setup Node
+  #       uses: actions/setup-node@v4
+  #       with:
+  #         node-version: "20"
+  #         cache: npm
+
+  #     - name: Setup Java
+  #       uses: actions/setup-java@v4
+  #       with:
+  #         distribution: temurin
+  #         java-version: "17"
+
+  #     - name: Setup Android SDK
+  #       uses: android-actions/setup-android@v3
+
+  #     - name: Install dependencies
+  #       run: npm ci
+
+  #     - name: Generate Android native project (Expo prebuild)
+  #       run: npx expo prebuild --platform android --no-install --non-interactive
+
+  #     - name: Build (assembleDebug)
+  #       run: |
+  #         chmod +x android/gradlew
+  #         cd android
+  #         ./gradlew :app:assembleDebug
+
+  # ios:
+  #   name: iOS simulator build
+  #   runs-on: macos-14
+  #   steps:
+  #     - uses: actions/checkout@v4
+
+  #     - name: Setup Node
+  #       uses: actions/setup-node@v4
+  #       with:
+  #         node-version: "20"
+  #         cache: npm
+
+  #     - name: Install dependencies
+  #       run: npm ci
+
+  #     - name: Install CocoaPods
+  #       run: |
+  #         cd ios
+  #         pod install --deployment
+
+  #     - name: Build (xcodebuild)
+  #       run: |
+  #         xcodebuild \
+  #           -workspace ios/cerbosepdp.xcworkspace \
+  #           -scheme cerbosepdp \
+  #           -configuration Debug \
+  #           -sdk iphonesimulator \
+  #           -destination "generic/platform=iOS Simulator" \
+  #           -derivedDataPath build/DerivedData \
+  #           CODE_SIGNING_ALLOWED=NO \
+  #           build

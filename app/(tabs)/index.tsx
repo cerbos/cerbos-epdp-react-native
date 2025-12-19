@@ -1,153 +1,239 @@
-import { useCerbos } from "@/components/CerbosContext";
-import { PrincipalPicker } from "@/components/PrincipalPicker";
-import { ResourcePicker } from "@/components/ResourcePicker";
-import { ThemedText } from "@/components/ThemedText";
-import { ThemedView } from "@/components/ThemedView";
-import { principals, resources } from "@/constants/data";
-import {
-  CheckResourcesResponse,
-  Principal,
-  Resource,
-} from "@cerbos/core/src/types/external";
+import type { Options as EmbeddedClientOptions, PolicyLoaderOptions } from '@cerbos/embedded-client';
+import React, { useState } from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, Switch, TextInput, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useEffect, useState } from "react";
-import { Button, ScrollView, StyleSheet } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { useCerbosEpdp } from '@/components/cerbos-epdp-context';
+import { ThemedText } from '@/components/themed-text';
+import { ThemedView } from '@/components/themed-view';
 
-export default function HomeScreen() {
-  const { isLoaded, metadata } = useCerbos(); // Access Cerbos context
-  const [principal, setPrincipal] = useState<Principal>(principals[0]); // Selected principal
-  const [resource, setResource] = useState<Resource>(resources[0]); // Selected resource
+const defaultEmbeddedOptionsJson = JSON.stringify(
+  {
+    schemaEnforcement: 'warn',
+    lenientScopeSearch: true,
+  },
+  null,
+  2,
+);
 
-  return (
-    <ScrollView style={{ flex: 1 }}>
-      <SafeAreaView>
-        <ThemedView style={styles.titleContainer}>
-          <ThemedText type="title">Cerbos ePDP Demo</ThemedText>
-        </ThemedView>
+const defaultPolicyOptionsJson = JSON.stringify(
+  {
+    scopes: [],
+    activateOnLoad: true,
+    interval: 60,
+  },
+  null,
+  2,
+);
 
-        {/* Dropdowns for selecting principal and resource */}
-        <ThemedView style={styles.dropdownContainer}>
-          <PrincipalPicker principal={principal} setPrincipal={setPrincipal} />
-          <ResourcePicker resource={resource} setResource={setResource} />
-        </ThemedView>
-
-        {/* Cerbos PDP loading state */}
-        {!isLoaded && <ThemedText>Loading Cerbos PDP...</ThemedText>}
-
-        {/* Authorization check example */}
-        <SampleAuthCheck
-          principal={principal}
-          resource={resource}
-          actions={["create", "read", "update", "delete"]}
-        />
-
-        {/* Display PDP load timestamp */}
-        {metadata && (
-          <>
-            <ThemedText style={styles.timestampText}>
-              Cerbos PDP loaded at: {metadata.updatedAt}
-            </ThemedText>
-            <ThemedText style={styles.timestampText}>
-              Policy Commit: {metadata.commit}
-            </ThemedText>
-          </>
-        )}
-      </SafeAreaView>
-    </ScrollView>
-  );
+function parseJson<T>(input: string, label: string): T {
+  try {
+    return JSON.parse(input) as T;
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    throw new Error(`${label} is not valid JSON: ${message}`);
+  }
 }
 
-// Component to perform and display authorization checks
-function SampleAuthCheck({
-  principal,
-  resource,
-  actions,
-}: {
-  principal: Principal;
-  resource: Resource;
-  actions: string[];
-}) {
-  const { checkResources, isLoaded } = useCerbos(); // Access Cerbos context
-  const [result, setResult] = useState<CheckResourcesResponse | null>(null);
+export default function EpdpConfigScreen() {
+  const { init } = useCerbosEpdp();
 
-  // Function to check permissions
-  const checkAccess = async () => {
+  const [ruleId, setRuleId] = useState('AVGB9RP6HFBL');
+  const [hubClientId, setHubClientId] = useState('');
+  const [hubClientSecret, setHubClientSecret] = useState('');
+  const [hubBaseUrl, setHubBaseUrl] = useState('https://api.cerbos.cloud');
+  const [embeddedOptionsJson, setEmbeddedOptionsJson] = useState(defaultEmbeddedOptionsJson);
+  const [policyOptionsJson, setPolicyOptionsJson] = useState(defaultPolicyOptionsJson);
+  const [enableOnDecision, setEnableOnDecision] = useState(true);
+  const [enableOnValidationError, setEnableOnValidationError] = useState(false);
+  const [enableDecodeJwtPayload, setEnableDecodeJwtPayload] = useState(false);
+  const [enablePolicyOnUpdate, setEnablePolicyOnUpdate] = useState(false);
+
+  const [isInitializing, setIsInitializing] = useState(false);
+  const [initError, setInitError] = useState('');
+  const [initSuccess, setInitSuccess] = useState('');
+
+  const onInit = async () => {
+    setIsInitializing(true);
+    setInitError('');
+    setInitSuccess('');
     try {
-      const result = await checkResources({
-        principal,
-        resources: [{ resource, actions }],
+      const options = parseJson<
+        Partial<
+          Pick<
+            EmbeddedClientOptions,
+            | 'headers'
+            | 'userAgent'
+            | 'defaultPolicyVersion'
+            | 'globals'
+            | 'lenientScopeSearch'
+            | 'schemaEnforcement'
+            | 'onValidationError'
+          >
+        >
+      >(embeddedOptionsJson || '{}', 'Embedded options JSON');
+
+      const policyOptions = parseJson<Partial<Pick<PolicyLoaderOptions, 'scopes' | 'activateOnLoad' | 'interval'>>>(
+        policyOptionsJson || '{}',
+        'Policy options JSON',
+      );
+
+      await init({
+        ruleId,
+        hubClientId,
+        hubClientSecret,
+        hubBaseUrl,
+        options,
+        policyOptions,
+        enableOnDecision,
+        enableOnValidationError,
+        enableDecodeJwtPayload,
+        enablePolicyOnUpdate,
       });
-      console.log("[App] Auth check result:", JSON.stringify(result));
-      setResult(result);
-    } catch (err) {
-      console.error("[App] Auth check failed:", err);
-      setResult(null);
+      setInitSuccess(`Initialized at ${new Date().toISOString()}`);
+      Alert.alert('Initialized', 'ePDP initialized inside the WebView.');
+    } catch (e) {
+      setInitError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setIsInitializing(false);
     }
   };
 
-  // Reset result when principal or resource changes
-  useEffect(() => {
-    setResult(null);
-  }, [principal, resource]);
-
   return (
-    <ThemedView style={styles.stepContainer}>
-      <Button
-        title="Check Permissions"
-        onPress={checkAccess}
-        disabled={!isLoaded}
-      />
-      {actions.map((action) => (
-        <ThemedView style={styles.actionRow} key={action}>
-          <ThemedText>{action}:</ThemedText>
-          {result ? (
-            result.isAllowed({ resource, action }) ? (
-              <ThemedText style={styles.allowedText}>Allowed</ThemedText>
-            ) : (
-              <ThemedText style={styles.deniedText}>Denied</ThemedText>
-            )
-          ) : (
-            <ThemedText>-</ThemedText>
-          )}
+    <SafeAreaView style={styles.safeArea}>
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <ThemedView style={styles.section}>
+          <ThemedText type="title">ePDP</ThemedText>
+          <ThemedText style={styles.muted}>Configure and initialize the embedded Cerbos PDP running inside the WebView.</ThemedText>
         </ThemedView>
-      ))}
-    </ThemedView>
+
+        <ThemedView style={styles.section}>
+          <ThemedText type="subtitle">Hub</ThemedText>
+
+          <ThemedText style={styles.label}>Rule ID</ThemedText>
+          <TextInput
+            style={styles.input}
+            value={ruleId}
+            onChangeText={setRuleId}
+            autoCapitalize="none"
+            autoCorrect={false}
+            placeholder="e.g. B5LU9EVYN1MD"
+          />
+
+          <ThemedText style={styles.label}>Hub Client ID</ThemedText>
+          <TextInput
+            style={styles.input}
+            value={hubClientId}
+            onChangeText={setHubClientId}
+            autoCapitalize="none"
+            autoCorrect={false}
+            placeholder="CERBOS_HUB_CLIENT_ID"
+          />
+
+          <ThemedText style={styles.label}>Hub Client Secret</ThemedText>
+          <TextInput
+            style={styles.input}
+            value={hubClientSecret}
+            onChangeText={setHubClientSecret}
+            autoCapitalize="none"
+            autoCorrect={false}
+            secureTextEntry
+            placeholder="CERBOS_HUB_CLIENT_SECRET"
+          />
+
+          <ThemedText style={styles.label}>Hub Base URL</ThemedText>
+          <TextInput
+            style={styles.input}
+            value={hubBaseUrl}
+            onChangeText={setHubBaseUrl}
+            autoCapitalize="none"
+            autoCorrect={false}
+            placeholder="https://api.cerbos.cloud"
+          />
+        </ThemedView>
+
+        <ThemedView style={styles.section}>
+          <ThemedText type="subtitle">Options</ThemedText>
+
+          <ThemedText style={styles.label}>Embedded client options (JSON)</ThemedText>
+          <TextInput
+            style={[styles.input, styles.multilineSmall]}
+            value={embeddedOptionsJson}
+            onChangeText={setEmbeddedOptionsJson}
+            autoCapitalize="none"
+            autoCorrect={false}
+            multiline
+            textAlignVertical="top"
+          />
+
+          <ThemedText style={styles.label}>Policy loader options (JSON)</ThemedText>
+          <TextInput
+            style={[styles.input, styles.multilineSmall]}
+            value={policyOptionsJson}
+            onChangeText={setPolicyOptionsJson}
+            autoCapitalize="none"
+            autoCorrect={false}
+            multiline
+            textAlignVertical="top"
+          />
+        </ThemedView>
+
+        <ThemedView style={styles.section}>
+          <ThemedText type="subtitle">Callbacks</ThemedText>
+
+          <View style={styles.toggleRow}>
+            <ThemedText>onDecision (decision log)</ThemedText>
+            <Switch value={enableOnDecision} onValueChange={setEnableOnDecision} />
+          </View>
+          <View style={styles.toggleRow}>
+            <ThemedText>onValidationError (event log)</ThemedText>
+            <Switch value={enableOnValidationError} onValueChange={setEnableOnValidationError} />
+          </View>
+          <View style={styles.toggleRow}>
+            <ThemedText>decodeJWTPayload</ThemedText>
+            <Switch value={enableDecodeJwtPayload} onValueChange={setEnableDecodeJwtPayload} />
+          </View>
+          <View style={styles.toggleRow}>
+            <ThemedText>policy onUpdate</ThemedText>
+            <Switch value={enablePolicyOnUpdate} onValueChange={setEnablePolicyOnUpdate} />
+          </View>
+        </ThemedView>
+
+        <ThemedView style={styles.section}>
+          <Pressable style={[styles.button, isInitializing && styles.buttonDisabled]} disabled={isInitializing} onPress={onInit}>
+            <ThemedText type="defaultSemiBold">{isInitializing ? 'Initializing…' : 'Init ePDP'}</ThemedText>
+          </Pressable>
+          {!!initError && <ThemedText style={styles.error}>{initError}</ThemedText>}
+          {!!initSuccess && <ThemedText style={styles.success}>{initSuccess}</ThemedText>}
+        </ThemedView>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
-// Styles for the component
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: "row",
-    gap: 8,
-    padding: 16,
+  safeArea: { flex: 1 },
+  content: { padding: 16, gap: 16 },
+  section: { gap: 10, padding: 12, borderRadius: 12 },
+  label: { fontSize: 12, opacity: 0.75 },
+  muted: { fontSize: 12, opacity: 0.7 },
+  error: { fontSize: 12, color: '#b00020' },
+  success: { fontSize: 12, color: '#0a7ea4' },
+  toggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  input: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#999',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
   },
-  dropdownContainer: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "center",
+  multilineSmall: { minHeight: 120 },
+  button: {
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#e6e6e6',
   },
-
-  stepContainer: {
-    gap: 8,
-    marginBottom: 16,
-    padding: 16,
-    borderRadius: 8,
-  },
-  actionRow: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  allowedText: {
-    color: "#43A047",
-  },
-  deniedText: {
-    color: "#E53935",
-  },
-  timestampText: {
-    fontSize: 12,
-    textAlign: "center",
-  },
+  buttonDisabled: { opacity: 0.6 },
 });
