@@ -18,7 +18,7 @@
     "@cerbos/embedded": "^0.11.1",
     "@expo/vector-icons": "^15.0.0",
     "@react-native-async-storage/async-storage": "^2.1.2",
-    "@react-native-community/netinfo": "^11.4.1",
+    "@react-native-community/netinfo": "^12.0.0",
     "@react-navigation/bottom-tabs": "^7.2.0",
     "@react-navigation/native": "^7.0.14",
     "axios": "^1.12.0",
